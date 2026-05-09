@@ -1,93 +1,403 @@
-# Rust
+# VectorAmp Rust SDK
 
+Idiomatic async Rust client for the public VectorAmp API.
 
+- Default API base URL: `https://api.vectoramp.com`
+- Auth: `X-API-Key: <api_key>`
+- Async / await on top of `reqwest` and `tokio`, with a small `Transport` trait so a different stack (gRPC, mocks) can be plugged in
+- Dataset creation always uses SABLE; the SDK intentionally does not expose an index type option
 
-## Getting started
+> This crate is source-ready. It has not been published or tagged yet.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Install
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Pre-launch the crate is consumed directly from the GitLab repository:
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```toml
+# Cargo.toml
+[dependencies]
+vectoramp = { git = "https://gitlab.com/VectorAmp/SDK/Rust.git" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/VectorAmp/SDK/Rust.git
-git branch -M main
-git push -uf origin main
+
+After launch, the crate will be published to crates.io as `vectoramp`:
+
+```toml
+[dependencies]
+vectoramp = "0.1"
 ```
 
-## Integrate with your tools
+## Quick start
 
-* [Set up project integrations](https://gitlab.com/VectorAmp/SDK/Rust/-/settings/integrations)
+```rust
+use vectoramp::{Client, CreateDatasetRequest, EmbeddingConfig};
 
-## Collaborate with your team
+#[tokio::main]
+async fn main() -> vectoramp::Result<()> {
+    let client = Client::new(std::env::var("VECTORAMP_API_KEY").unwrap());
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+    let dataset = client
+        .datasets()
+        .create(CreateDatasetRequest {
+            name: "product-docs".into(),
+            dim: 2560,
+            metric: Some("cosine".into()),
+            embedding: Some(EmbeddingConfig {
+                provider: Some("vectoramp".into()),
+                model: Some("VectorAmp-Embedding-2560".into()),
+            }),
+            ..Default::default()
+        })
+        .await?;
 
-## Test and Deploy
+    dataset
+        .add_texts(vec!["VectorAmp is a high-performance vector database."])
+        .await?;
 
-Use the built-in continuous integration in GitLab.
+    let answer = dataset.ask("What is VectorAmp?").await?;
+    println!("{}", answer.answer);
+    Ok(())
+}
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Configure the client
 
-***
+```rust
+use vectoramp::Client;
 
-# Editing this README
+let client = Client::builder()
+    .api_key(std::env::var("VECTORAMP_API_KEY").unwrap())
+    .base_url("https://api.vectoramp.com")
+    .build()?;
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Custom HTTP client:
 
-## Suggestions for a good README
+```rust
+let http = reqwest::Client::builder()
+    .timeout(std::time::Duration::from_secs(60))
+    .build()?;
+let client = Client::builder()
+    .api_key(api_key)
+    .http_client(http)
+    .build()?;
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Custom transport for tests or future protocols:
 
-## Name
-Choose a self-explaining name for your project.
+```rust
+use std::sync::Arc;
+use async_trait::async_trait;
+use vectoramp::{Client, Request, Response, Transport};
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+struct MyTransport;
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+#[async_trait]
+impl Transport for MyTransport {
+    async fn send(&self, _req: Request) -> vectoramp::Result<Response> {
+        unimplemented!()
+    }
+}
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+let client = Client::builder()
+    .api_key(api_key)
+    .transport(Arc::new(MyTransport))
+    .build()?;
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Datasets
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### List / get / create / delete
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```rust
+let page = client.datasets().list(50, 0).await?;
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+let dataset = client.datasets().get("dataset-id").await?;
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+let created = client
+    .datasets()
+    .create(CreateDatasetRequest {
+        name: "docs".into(),
+        dim: 2560,
+        metric: Some("cosine".into()),
+        ..Default::default()
+    })
+    .await?;
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+created.delete().await?;
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+`CreateDatasetRequest` does not include an `index_type` field. The SDK always sends `index_type: "sable"`.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+`create`, `get`, and `list` return `Dataset` resource handles bound to the originating client. You can use either resource-style or service-style calls:
 
-## License
-For open source projects, say how it is licensed.
+```rust
+let dataset = client.datasets().get("dataset-id").await?;
+let resp = dataset.search("hello").await?;
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+// Service-style remains supported.
+let resp = client.datasets().search("dataset-id", "hello").await?;
+```
+
+### Source documents
+
+Datasets can expose retained original source documents from ingestion or file upload. Document listing is cursor-based: pass `next_cursor` from the previous response and do not assume offsets or totals. `download_document` returns the original bytes and follows API/storage redirects.
+
+```rust
+use vectoramp::DocumentListOptions;
+
+let page = dataset
+    .list_documents(DocumentListOptions {
+        limit: Some(50),
+        status: Some("ready".into()),
+        ..Default::default()
+    })
+    .await?;
+
+for doc in &page.documents {
+    if doc.download_available {
+        let bytes = dataset.download_document(&doc.id).await?;
+        let _ = bytes;
+    }
+}
+
+if let Some(cursor) = page.next_cursor {
+    let next = dataset
+        .list_documents(DocumentListOptions {
+            cursor: Some(cursor),
+            ..Default::default()
+        })
+        .await?;
+    let _ = next;
+}
+```
+
+### Insert vectors
+
+```rust
+use vectoramp::Vector;
+
+dataset
+    .insert(vec![Vector {
+        id: "doc-1".into(),
+        values: vec![0.1, 0.2, 0.3],
+        metadata: Some([("title".into(), serde_json::json!("Intro"))].into_iter().collect()),
+    }])
+    .await?;
+```
+
+### Add texts
+
+`add_texts` embeds text through the dataset embedding model and inserts the resulting vectors. For quick inserts pass a `&str`, `Vec<&str>`, or `Vec<String>`; the SDK generates stable IDs (`text-1`, `text-2`, …). Pass a `Vec<TextDocument>` when you need custom IDs or metadata.
+
+```rust
+use vectoramp::TextDocument;
+
+dataset.add_texts(vec!["Hello world", "Machine learning notes"]).await?;
+
+dataset
+    .add_texts(vec![
+        TextDocument { id: "doc-1".into(), text: "Hello world".into(), metadata: None },
+        TextDocument { id: "doc-2".into(), text: "Machine learning notes".into(), metadata: None },
+    ])
+    .await?;
+```
+
+### Search
+
+```rust
+use vectoramp::{SearchOptions, SearchInput};
+
+let resp = dataset.search("machine learning best practices").await?;
+
+let resp = dataset
+    .search_with(
+        "machine learning best practices",
+        SearchOptions {
+            top_k: Some(10),
+            include_documents: Some(true),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+// Vector search:
+let resp = dataset.search(SearchInput::Vector(vec![0.1, 0.2, 0.3])).await?;
+```
+
+String searches default to `top_k: 10` when you omit `SearchOptions::top_k`.
+
+## Ingestion
+
+### Sources and jobs
+
+```rust
+use vectoramp::StartIngestionRequest;
+
+let sources = client.ingestion().list_sources(50, 0).await?;
+let source = client.ingestion().get_source(&sources.sources[0].id.clone().unwrap_or_default()).await?;
+
+let dataset = client.datasets().get("dataset-id").await?;
+let job = dataset.ingest_source(source.identifier().unwrap()).await?;
+
+// Equivalent service-style call.
+let job = client
+    .ingestion()
+    .start_job(StartIngestionRequest {
+        source_id: source.identifier().unwrap().into(),
+        dataset_id: dataset.id().into(),
+        pipeline_id: None,
+    })
+    .await?;
+
+let jobs = client.ingestion().list_jobs(Some("dataset-id"), 50, 0).await?;
+let job = client.ingestion().get_job(&job.job_id).await?;
+```
+
+### Typed source builders
+
+Typed builders make source creation safer while still preserving `CreateSourceRequest` for fully manual calls. Supported public `source_type` values include `s3`, `web`, `gcs`, `gdrive`, `file_upload`, and `jira`; use `GenericSource` as an escape hatch.
+
+```rust
+use vectoramp::{S3Source, WebSource, GoogleDriveSource, FileUploadSource, GenericSource};
+
+let web = client
+    .sources()
+    .create_source(WebSource {
+        start_urls: vec!["https://docs.example.com".into()],
+        max_depth: Some(2),
+        ..Default::default()
+    })
+    .await?;
+
+let s3 = client
+    .sources()
+    .create_source(S3Source {
+        bucket: "my-bucket".into(),
+        prefix: Some("docs/".into()),
+        region: Some("us-east-1".into()),
+        access_key_id: Some(std::env::var("AWS_ACCESS_KEY_ID").unwrap()),
+        secret_access_key: Some(std::env::var("AWS_SECRET_ACCESS_KEY").unwrap()),
+        ..Default::default()
+    })
+    .await?;
+
+let gdrive = client
+    .sources()
+    .create_source(GoogleDriveSource {
+        auth_mode: Some("service_account".into()),
+        service_account_json: Some(std::env::var("GOOGLE_SERVICE_ACCOUNT_JSON").unwrap()),
+        folder_ids: vec!["folder-id".into()],
+        ..Default::default()
+    })
+    .await?;
+
+let upload = client.sources().create_source(FileUploadSource::default()).await?;
+
+let custom = client
+    .sources()
+    .create_source(GenericSource {
+        source_type: "custom".into(),
+        name: "custom-source".into(),
+        config: [("type".into(), serde_json::json!("custom"))].into_iter().collect(),
+        ..Default::default()
+    })
+    .await?;
+```
+
+`Dataset::ingest_new_source` accepts any builder, creates the source, and starts the ingestion job:
+
+```rust
+let job = dataset
+    .ingest_new_source(WebSource {
+        start_urls: vec!["https://example.com/releases".into()],
+        ..Default::default()
+    })
+    .await?;
+```
+
+### Filesystem upload ingestion
+
+For local files, the SDK creates a `file_upload` source, initializes presigned uploads, uploads file bytes, and completes the upload.
+
+```rust
+use std::path::PathBuf;
+use vectoramp::IngestFilesOptions;
+
+let job = dataset
+    .ingest_files(vec![PathBuf::from("./docs/guide.pdf")], None)
+    .await?;
+
+let job = dataset
+    .ingest_files(
+        vec![PathBuf::from("./docs/guide.pdf")],
+        Some(IngestFilesOptions {
+            source_name: Some("product-docs-upload".into()),
+            ..Default::default()
+        }),
+    )
+    .await?;
+```
+
+## Intelligence / RAG
+
+### Non-streaming
+
+```rust
+use vectoramp::AskOptions;
+
+let answer = client.ask("What are the key product features?").await?;
+
+let answer = client
+    .ask_with(
+        "What are the key product features?",
+        AskOptions::default().with_all_datasets().with_top_k(5),
+    )
+    .await?;
+
+let answer = dataset.ask("What are the key product features?").await?;
+```
+
+### Streaming SSE
+
+```rust
+let mut stream = client
+    .intelligence()
+    .stream(
+        "Summarize the launch plan",
+        AskOptions::default().with_dataset("dataset-id"),
+    )
+    .await?;
+
+while let Some(event) = stream.next_event().await? {
+    if event.chunk_type == "text" {
+        print!("{}", event.content);
+    }
+}
+```
+
+## Errors
+
+Non-2xx responses surface as `Error::Api(ApiError)`.
+
+```rust
+match client.datasets().get("missing").await {
+    Ok(dataset) => { let _ = dataset; }
+    Err(vectoramp::Error::Api(err)) => {
+        eprintln!("api error {}: {}", err.status, err.message);
+    }
+    Err(err) => {
+        eprintln!("transport error: {err}");
+    }
+}
+```
+
+## Development
+
+```bash
+cargo fmt
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+```
+
+GitLab CI runs the format check, clippy, and the full test suite.

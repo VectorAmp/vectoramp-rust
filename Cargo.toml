@@ -1,0 +1,29 @@
+[package]
+name = "vectoramp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Official Rust client for the VectorAmp public API."
+license = "LicenseRef-VectorAmp-Proprietary"
+repository = "https://gitlab.com/VectorAmp/SDK/Rust"
+homepage = "https://vectoramp.com"
+documentation = "https://docs.vectoramp.com"
+readme = "README.md"
+keywords = ["vectoramp", "vector-database", "rag", "embeddings", "search"]
+categories = ["api-bindings", "database"]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+tokio = { version = "1", features = ["fs", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+thiserror = "1"
+futures-util = "0.3"
+mime_guess = "2"
+bytes = "1"
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+wiremock = "0.6"
