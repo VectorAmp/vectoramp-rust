@@ -125,8 +125,7 @@ impl Transport for RestTransport {
         if !self.user_agent.is_empty() {
             headers.insert(
                 USER_AGENT,
-                HeaderValue::from_str(&self.user_agent)
-                    .map_err(|e| Error::Other(e.to_string()))?,
+                HeaderValue::from_str(&self.user_agent).map_err(|e| Error::Other(e.to_string()))?,
             );
         }
         if !self.api_key.is_empty() {
@@ -143,8 +142,8 @@ impl Transport for RestTransport {
             headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
         }
         for (k, v) in &req.headers {
-            let name = HeaderName::from_bytes(k.as_bytes())
-                .map_err(|e| Error::Other(e.to_string()))?;
+            let name =
+                HeaderName::from_bytes(k.as_bytes()).map_err(|e| Error::Other(e.to_string()))?;
             headers.insert(
                 name,
                 HeaderValue::from_str(v).map_err(|e| Error::Other(e.to_string()))?,

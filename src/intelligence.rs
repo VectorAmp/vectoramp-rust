@@ -98,7 +98,11 @@ impl IntelligenceService {
     ///
     /// The returned [`AskStream`] yields decoded server-sent events. The SDK
     /// always sets `stream: true` on the request body.
-    pub async fn stream<S: Into<String>>(&self, query: S, options: AskOptions) -> Result<AskStream> {
+    pub async fn stream<S: Into<String>>(
+        &self,
+        query: S,
+        options: AskOptions,
+    ) -> Result<AskStream> {
         let request = AskRequest {
             query: query.into(),
             dataset_id: options.dataset_id,
@@ -148,8 +152,7 @@ struct StreamPayload {
     metadata: Option<Metadata>,
 }
 
-type ByteStream =
-    Box<dyn Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + Unpin>;
+type ByteStream = Box<dyn Stream<Item = std::result::Result<Bytes, reqwest::Error>> + Send + Unpin>;
 
 /// Async iterator over [`StreamEvent`]s produced by an intelligence stream.
 pub struct AskStream {

@@ -44,8 +44,7 @@ async fn create_dataset_always_sends_sable_index_type() {
     assert_eq!(dataset.id(), "ds_1");
 
     let received = server.received_requests().await.unwrap();
-    let body: serde_json::Value =
-        serde_json::from_slice(&received[0].body).expect("json body");
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["index_type"], "sable");
 }
 
@@ -70,8 +69,7 @@ async fn search_defaults_top_k_to_10() {
         .expect("search ok");
 
     let received = server.received_requests().await.unwrap();
-    let body: serde_json::Value =
-        serde_json::from_slice(&received[0].body).expect("json body");
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["top_k"], 10);
     assert_eq!(body["query_text"], "machine learning");
 }
@@ -101,8 +99,7 @@ async fn search_with_options_overrides_top_k() {
         .expect("search ok");
 
     let received = server.received_requests().await.unwrap();
-    let body: serde_json::Value =
-        serde_json::from_slice(&received[0].body).expect("json body");
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["top_k"], 25);
     assert_eq!(body["include_metadata"], false);
     assert_eq!(body["query"], json!([0.1, 0.2, 0.3]));
@@ -138,8 +135,7 @@ async fn add_texts_embeds_then_inserts() {
         .iter()
         .find(|r| r.url.path().ends_with("/insert"))
         .expect("insert request");
-    let body: serde_json::Value =
-        serde_json::from_slice(&insert_req.body).expect("json body");
+    let body: serde_json::Value = serde_json::from_slice(&insert_req.body).expect("json body");
     let vectors = body["vectors"].as_array().expect("vectors array");
     assert_eq!(vectors.len(), 2);
     assert_eq!(vectors[0]["id"], "text-1");
@@ -163,8 +159,7 @@ async fn ask_helper_targets_intelligence_endpoint() {
     assert_eq!(resp.answer, "VectorAmp is a vector database.");
 
     let received = server.received_requests().await.unwrap();
-    let body: serde_json::Value =
-        serde_json::from_slice(&received[0].body).expect("json body");
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["query"], "What is VectorAmp?");
     assert_eq!(body["stream"], false);
 }

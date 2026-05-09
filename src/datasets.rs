@@ -13,9 +13,8 @@ use crate::sources::IntoCreateSourceRequest;
 use crate::transport::Request;
 use crate::types::{
     AddTextsResponse, AskRequest, AskResponse, CreateDatasetRequest, DatasetDocumentList,
-    DatasetInfo, DatasetList, DocumentListOpts, EmbedRequest, EmbedResponse,
-    InsertVectorsRequest, InsertVectorsResponse, Job, Metadata, SearchRequest, SearchResponse,
-    TextDocument, Vector,
+    DatasetInfo, DatasetList, DocumentListOpts, EmbedRequest, EmbedResponse, InsertVectorsRequest,
+    InsertVectorsResponse, Job, Metadata, SearchRequest, SearchResponse, TextDocument, Vector,
 };
 
 /// Default search top_k applied when one is not supplied.
@@ -122,11 +121,7 @@ impl DatasetService {
     }
 
     /// Download retained original document bytes.
-    pub async fn download_document(
-        &self,
-        dataset_id: &str,
-        document_id: &str,
-    ) -> Result<Vec<u8>> {
+    pub async fn download_document(&self, dataset_id: &str, document_id: &str) -> Result<Vec<u8>> {
         self.client
             .dispatcher()
             .bytes(Request {
@@ -143,7 +138,8 @@ impl DatasetService {
         dataset_id: &str,
         input: I,
     ) -> Result<SearchResponse> {
-        self.search_with(dataset_id, input, SearchOptions::default()).await
+        self.search_with(dataset_id, input, SearchOptions::default())
+            .await
     }
 
     /// Search with additional options.
@@ -232,7 +228,8 @@ impl DatasetService {
         dataset_id: &str,
         input: I,
     ) -> Result<AddTextsResponse> {
-        self.add_texts_with(dataset_id, input, AddTextsOptions::default()).await
+        self.add_texts_with(dataset_id, input, AddTextsOptions::default())
+            .await
     }
 
     /// Like [`DatasetService::add_texts`] but with explicit options.
@@ -359,7 +356,8 @@ impl DatasetService {
 
     /// Run an intelligence query scoped to one dataset.
     pub async fn ask<S: Into<String>>(&self, dataset_id: &str, query: S) -> Result<AskResponse> {
-        self.ask_with(dataset_id, query, AskOptions::default()).await
+        self.ask_with(dataset_id, query, AskOptions::default())
+            .await
     }
 
     /// Like [`DatasetService::ask`] but with explicit options.
@@ -370,7 +368,10 @@ impl DatasetService {
         mut options: AskOptions,
     ) -> Result<AskResponse> {
         options.dataset_id = Some(json!(dataset_id.to_owned()));
-        self.client.intelligence().ask_with(query.into(), options).await
+        self.client
+            .intelligence()
+            .ask_with(query.into(), options)
+            .await
     }
 }
 
@@ -530,7 +531,10 @@ impl Dataset {
         query: S,
         options: AskOptions,
     ) -> Result<AskResponse> {
-        self.client.datasets().ask_with(self.id(), query, options).await
+        self.client
+            .datasets()
+            .ask_with(self.id(), query, options)
+            .await
     }
 
     /// List retained source documents.
@@ -560,7 +564,10 @@ impl Dataset {
 
     /// Start ingestion from an existing source.
     pub async fn ingest_source(&self, source_id: &str) -> Result<Job> {
-        self.client.datasets().ingest_source(self.id(), source_id).await
+        self.client
+            .datasets()
+            .ingest_source(self.id(), source_id)
+            .await
     }
 
     /// Start ingestion from an existing source with an explicit pipeline.
@@ -577,7 +584,10 @@ impl Dataset {
 
     /// Create a new source from a typed builder and start an ingestion job.
     pub async fn ingest_new_source<B: IntoCreateSourceRequest>(&self, builder: B) -> Result<Job> {
-        self.client.datasets().ingest_new_source(self.id(), builder).await
+        self.client
+            .datasets()
+            .ingest_new_source(self.id(), builder)
+            .await
     }
 
     /// Delete this dataset.

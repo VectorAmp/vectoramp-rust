@@ -253,7 +253,8 @@ impl IngestionService {
             file_ids.push(target.file_id.clone());
         }
 
-        self.complete_upload(&source_id, &init.job_id, file_ids).await
+        self.complete_upload(&source_id, &init.job_id, file_ids)
+            .await
     }
 }
 

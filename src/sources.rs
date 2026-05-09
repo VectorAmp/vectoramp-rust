@@ -437,9 +437,7 @@ impl IntoCreateSourceRequest for FileUploadSource {
         }
         merge_extra(&mut config, self.config_extra);
 
-        let name = self
-            .name
-            .unwrap_or_else(|| "rust-sdk-file-upload".into());
+        let name = self.name.unwrap_or_else(|| "rust-sdk-file-upload".into());
 
         CreateSourceRequest {
             source_type: source_type::FILE_UPLOAD.into(),
