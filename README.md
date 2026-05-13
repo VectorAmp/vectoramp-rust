@@ -1,5 +1,8 @@
 # VectorAmp Rust SDK
 
+[![pipeline status](https://gitlab.com/VectorAmp/SDK/Rust/badges/main/pipeline.svg)](https://gitlab.com/VectorAmp/SDK/Rust/-/commits/main)
+[![coverage report](https://gitlab.com/VectorAmp/SDK/Rust/badges/main/coverage.svg)](https://gitlab.com/VectorAmp/SDK/Rust/-/commits/main)
+
 Idiomatic async Rust client for the public VectorAmp API.
 
 - Default API base URL: `https://api.vectoramp.com`
