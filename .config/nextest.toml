@@ -1,2 +1,3 @@
 [profile.ci]
+retries = 2
 junit.path = "results.xml"
