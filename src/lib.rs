@@ -42,6 +42,7 @@ pub mod datasets;
 pub mod errors;
 pub mod ingestion;
 pub mod intelligence;
+pub mod schedules;
 pub mod sources;
 pub mod transport;
 pub mod types;
@@ -51,6 +52,7 @@ pub use datasets::{AddTextsOptions, Dataset, DatasetService, SearchInput, Search
 pub use errors::{ApiError, Error, Result};
 pub use ingestion::{DocumentListOptions, IngestFilesOptions, IngestionService};
 pub use intelligence::{AskOptions, AskStream, IntelligenceService, StreamEvent};
+pub use schedules::ScheduleService;
 pub use sources::{
     FileUploadSource, GcsSource, GenericSource, GoogleDriveSource, IntoCreateSourceRequest,
     JiraSource, S3Source, WebSelectors, WebSource,

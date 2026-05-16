@@ -495,6 +495,98 @@ pub struct DatasetDocument {
     pub updated_at: Option<String>,
 }
 
+/// Recurring ingestion schedule returned by the API.
+///
+/// A schedule pairs a source with a target dataset and a cron expression. The
+/// server's ingestion scheduler daemon polls for due schedules and creates jobs
+/// as they fire.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct Schedule {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub organization_id: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub dataset_id: Option<String>,
+    #[serde(default)]
+    pub pipeline_id: Option<String>,
+    #[serde(default)]
+    pub cron: Option<String>,
+    #[serde(default)]
+    pub timezone: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub next_run_at: Option<String>,
+    #[serde(default)]
+    pub last_run_at: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<Metadata>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Paginated list of schedules.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct ScheduleList {
+    #[serde(default)]
+    pub schedules: Vec<Schedule>,
+    #[serde(default)]
+    pub total: u32,
+    #[serde(default)]
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+/// Body for creating an ingestion schedule.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct CreateScheduleRequest {
+    pub source_id: String,
+    pub dataset_id: String,
+    pub cron: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
+}
+
+/// Body for updating an ingestion schedule. Only `Some` fields are sent.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct UpdateScheduleRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
+}
+
+/// Response from an immediate schedule trigger.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct TriggerScheduleResponse {
+    #[serde(default)]
+    pub job_id: Option<String>,
+}
+
 /// Cursor-paginated dataset document list.
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct DatasetDocumentList {

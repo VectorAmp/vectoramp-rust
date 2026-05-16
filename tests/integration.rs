@@ -1,7 +1,8 @@
 use serde_json::json;
 use vectoramp::{
     sources::IntoCreateSourceRequest, AddTextsResponse, Client, CreateDatasetRequest,
-    CreateSourceRequest, FileUploadSource, S3Source, SearchInput, SearchOptions, WebSource,
+    CreateScheduleRequest, CreateSourceRequest, FileUploadSource, S3Source, SearchInput,
+    SearchOptions, UpdateScheduleRequest, WebSource,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -208,6 +209,93 @@ fn s3_source_uses_default_sync_mode_and_bucket_name() {
     assert_eq!(req.source_type, "s3");
     assert_eq!(req.name, "s3-my-bucket");
     assert_eq!(req.config["sync_mode"], "incremental");
+}
+
+#[tokio::test]
+async fn schedules_crud_and_trigger() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/ingestion/schedules"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "schedules": [{"id": "sch_1", "cron": "0 * * * *", "enabled": true}],
+            "total": 1,
+            "limit": 10,
+            "offset": 0
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/ingestion/schedules/sch_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "sch_1", "cron": "0 * * * *", "enabled": true
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/ingestion/schedules"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "sch_2", "cron": "0 0 * * *", "enabled": true
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path("/ingestion/schedules/sch_2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "sch_2", "enabled": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/ingestion/schedules/sch_2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"deleted": true})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/ingestion/schedules/sch_1/trigger"))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({"job_id": "job_42"})))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let page = client.schedules().list(10, 0).await.expect("list");
+    assert_eq!(page.total, 1);
+    assert_eq!(page.schedules[0].id, "sch_1");
+
+    let one = client.schedules().get("sch_1").await.expect("get");
+    assert_eq!(one.id, "sch_1");
+
+    let created = client
+        .schedules()
+        .create(CreateScheduleRequest {
+            source_id: "src_1".into(),
+            dataset_id: "ds_1".into(),
+            cron: "0 0 * * *".into(),
+            timezone: Some("UTC".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("create");
+    assert_eq!(created.id, "sch_2");
+
+    let updated = client
+        .schedules()
+        .update(
+            "sch_2",
+            UpdateScheduleRequest {
+                enabled: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update");
+    assert!(!updated.enabled);
+
+    client.schedules().delete("sch_2").await.expect("delete");
+
+    let trig = client.schedules().trigger("sch_1").await.expect("trigger");
+    assert_eq!(trig.job_id.as_deref(), Some("job_42"));
 }
 
 #[test]
