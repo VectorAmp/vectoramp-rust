@@ -8,6 +8,7 @@ use crate::datasets::DatasetService;
 use crate::errors::Result;
 use crate::ingestion::IngestionService;
 use crate::intelligence::{AskOptions, IntelligenceService};
+use crate::schedules::ScheduleService;
 use crate::transport::{Dispatcher, RestTransport, Transport};
 use crate::types::AskResponse;
 use crate::{DEFAULT_BASE_URL, USER_AGENT};
@@ -54,6 +55,11 @@ impl Client {
     /// Source-management alias for [`Client::ingestion`].
     pub fn sources(&self) -> IngestionService {
         self.ingestion()
+    }
+
+    /// Recurring ingestion schedule service.
+    pub fn schedules(&self) -> ScheduleService {
+        ScheduleService::new(self.clone())
     }
 
     /// Intelligence service (RAG queries).
