@@ -342,7 +342,8 @@ pub(crate) struct InitUploadRequest {
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct UploadTarget {
     pub file_id: String,
-    pub file_name: String,
+    #[serde(default)]
+    pub file_name: Option<String>,
     pub upload_url: String,
 }
 
