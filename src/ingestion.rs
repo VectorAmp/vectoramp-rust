@@ -69,7 +69,7 @@ impl IngestionService {
             .dispatcher()
             .json(Request {
                 method: "POST".into(),
-                path: "/v1/sources".into(),
+                path: "/ingestion/sources".into(),
                 body: Some(body),
                 ..Default::default()
             })
@@ -146,7 +146,7 @@ impl IngestionService {
             .dispatcher()
             .json(Request {
                 method: "POST".into(),
-                path: format!("/v1/sources/{source_id}/upload/init"),
+                path: format!("/ingestion/sources/{source_id}/upload/init"),
                 body: Some(body),
                 ..Default::default()
             })
@@ -168,7 +168,7 @@ impl IngestionService {
             .dispatcher()
             .json(Request {
                 method: "POST".into(),
-                path: format!("/v1/sources/{source_id}/upload/complete"),
+                path: format!("/ingestion/sources/{source_id}/upload/complete"),
                 body: Some(body),
                 ..Default::default()
             })
@@ -253,8 +253,11 @@ impl IngestionService {
             file_ids.push(target.file_id.clone());
         }
 
-        self.complete_upload(&source_id, &init.job_id, file_ids)
-            .await
+        let mut job = self.complete_upload(&source_id, &init.job_id, file_ids).await?;
+        if job.job_id.is_empty() {
+            job.job_id = init.job_id;
+        }
+        Ok(job)
     }
 }
 
