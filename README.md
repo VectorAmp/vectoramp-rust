@@ -216,6 +216,7 @@ let resp = dataset
         SearchOptions {
             top_k: Some(10),
             include_documents: Some(true),
+            rerank: Some(vectoramp::Rerank::Config(vectoramp::RerankConfig { enabled: true, ..Default::default() })), // vectoramp / VectorAmp-Rerank-v1
             ..Default::default()
         },
     )

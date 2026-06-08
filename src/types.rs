@@ -139,6 +139,24 @@ pub struct EmbedResponse {
 /// Provide either [`SearchRequest::query`] for vector search or
 /// [`SearchRequest::query_text`] for text search. `top_k` defaults to 10 when
 /// the SDK's `search` convenience helpers are used.
+/// VectorAmp rerank settings. Only `enabled` is required; provider defaults to
+/// `vectoramp` and model defaults to `VectorAmp-Rerank-v1`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum Rerank {
+    Enabled(bool),
+    Config(RerankConfig),
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct RerankConfig {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct SearchRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,6 +188,8 @@ pub struct SearchRequest {
     pub include_documents: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_metadata: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank: Option<Rerank>,
 }
 
 /// Structured metadata filter expression.

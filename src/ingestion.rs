@@ -253,7 +253,9 @@ impl IngestionService {
             file_ids.push(target.file_id.clone());
         }
 
-        let mut job = self.complete_upload(&source_id, &init.job_id, file_ids).await?;
+        let mut job = self
+            .complete_upload(&source_id, &init.job_id, file_ids)
+            .await?;
         if job.job_id.is_empty() {
             job.job_id = init.job_id;
         }
