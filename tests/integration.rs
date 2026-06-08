@@ -93,6 +93,10 @@ async fn search_with_options_overrides_top_k() {
             SearchOptions {
                 top_k: Some(25),
                 include_metadata: Some(false),
+                rerank: Some(vectoramp::Rerank::Config(vectoramp::RerankConfig {
+                    enabled: true,
+                    ..Default::default()
+                })),
                 ..Default::default()
             },
         )
@@ -104,6 +108,7 @@ async fn search_with_options_overrides_top_k() {
     assert_eq!(body["top_k"], 25);
     assert_eq!(body["include_metadata"], false);
     assert_eq!(body["query"], json!([0.1, 0.2, 0.3]));
+    assert_eq!(body["rerank"], json!({"enabled": true}));
 }
 
 #[tokio::test]

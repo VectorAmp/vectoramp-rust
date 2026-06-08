@@ -14,7 +14,8 @@ use crate::transport::Request;
 use crate::types::{
     AddTextsResponse, AskRequest, AskResponse, CreateDatasetRequest, DatasetDocumentList,
     DatasetInfo, DatasetList, DocumentListOpts, EmbedRequest, EmbedResponse, InsertVectorsRequest,
-    InsertVectorsResponse, Job, Metadata, SearchRequest, SearchResponse, TextDocument, Vector,
+    InsertVectorsResponse, Job, Metadata, Rerank, RerankConfig, SearchRequest, SearchResponse,
+    TextDocument, Vector,
 };
 
 /// Default search top_k applied when one is not supplied.
@@ -176,6 +177,9 @@ impl DatasetService {
         }
         if let Some(filters) = options.filters {
             req.filters = Some(filters);
+        }
+        if let Some(rerank) = options.rerank {
+            req.rerank = Some(rerank);
         }
         let body = serde_json::to_value(&req)?;
         self.client
@@ -413,6 +417,21 @@ pub struct SearchOptions {
     pub include_metadata: Option<bool>,
     pub include_documents: Option<bool>,
     pub filters: Option<HashMap<String, String>>,
+    pub rerank: Option<Rerank>,
+}
+
+impl SearchOptions {
+    /// Enable or disable VectorAmp reranking.
+    pub fn with_rerank(mut self, enabled: bool) -> Self {
+        self.rerank = Some(Rerank::Enabled(enabled));
+        self
+    }
+
+    /// Set rerank options. Only enabled is required; defaults are vectoramp / VectorAmp-Rerank-v1.
+    pub fn with_rerank_config(mut self, config: RerankConfig) -> Self {
+        self.rerank = Some(Rerank::Config(config));
+        self
+    }
 }
 
 /// Input forms accepted by [`DatasetService::add_texts`].
