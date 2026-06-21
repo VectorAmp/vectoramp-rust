@@ -1,8 +1,8 @@
 use serde_json::json;
 use vectoramp::{
-    sources::IntoCreateSourceRequest, AddTextsResponse, Client, CreateDatasetRequest,
-    CreateScheduleRequest, CreateSourceRequest, FileUploadSource, S3Source, SearchInput,
-    SearchOptions, UpdateScheduleRequest, WebSource,
+    sources::IntoCreateSourceRequest, AddTextsResponse, Client, ConfluenceSource,
+    CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest, FileUploadSource, S3Source,
+    SearchInput, SearchOptions, UpdateScheduleRequest, Vector, VectorId, WebSource,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -36,7 +36,7 @@ async fn create_dataset_always_sends_sable_index_type() {
         .datasets()
         .create(CreateDatasetRequest {
             name: "docs".into(),
-            dim: 8,
+            dim: Some(8),
             metric: Some("cosine".into()),
             ..Default::default()
         })
@@ -47,6 +47,119 @@ async fn create_dataset_always_sends_sable_index_type() {
     let received = server.received_requests().await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["index_type"], "sable");
+    // The request field is `dim`, never `dimension`.
+    assert_eq!(body["dim"], 8);
+    assert!(body.get("dimension").is_none());
+}
+
+#[tokio::test]
+async fn create_dataset_minimal_name_only_infers_defaults() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/datasets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "ds_min",
+            "name": "docs",
+            "dim": 2560,
+            "metric": "cosine",
+            "index_type": "sable"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    // Only a name — everything else defaulted/inferred by the SDK.
+    let dataset = client.datasets().create("docs").await.expect("created");
+    assert_eq!(dataset.id(), "ds_min");
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["name"], "docs");
+    assert_eq!(body["index_type"], "sable");
+    assert_eq!(body["dim"], 2560);
+    assert_eq!(body["metric"], "cosine");
+    assert_eq!(body["embedding"]["provider"], "vectoramp");
+    assert_eq!(body["embedding"]["model"], "VectorAmp-Embedding-4B");
+    // Hybrid is not sent unless explicitly requested.
+    assert!(body.get("hybrid").is_none());
+}
+
+#[tokio::test]
+async fn create_dataset_hybrid_sends_hybrid_flag() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/datasets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "ds_hy",
+            "name": "docs",
+            "dim": 2560,
+            "metric": "cosine",
+            "index_type": "sable"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let dataset = client
+        .datasets()
+        .create(CreateDatasetRequest::builder("docs").hybrid(true))
+        .await
+        .expect("created");
+    assert_eq!(dataset.id(), "ds_hy");
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["hybrid"], true);
+    assert_eq!(body["index_type"], "sable");
+    assert_eq!(body["dim"], 2560);
+}
+
+#[tokio::test]
+async fn create_dataset_openai_large_infers_3072() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/datasets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "ds_oa",
+            "name": "docs",
+            "dim": 3072,
+            "metric": "cosine",
+            "index_type": "sable"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .datasets()
+        .create(CreateDatasetRequest::builder("docs").openai("large"))
+        .await
+        .expect("created");
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["dim"], 3072);
+    assert_eq!(body["embedding"]["provider"], "openai");
+    assert_eq!(body["embedding"]["model"], "text-embedding-3-large");
+}
+
+#[tokio::test]
+async fn create_dataset_unknown_model_without_dim_errors() {
+    let client = test_client("http://127.0.0.1:1");
+    let result = client
+        .datasets()
+        .create(
+            CreateDatasetRequest::builder("docs").embedding(vectoramp::EmbeddingConfig {
+                provider: Some("acme".into()),
+                model: Some("acme-embed-9000".into()),
+            }),
+        )
+        .await;
+    match result {
+        Err(vectoramp::Error::InvalidInput(msg)) => assert!(msg.contains("dim")),
+        Err(other) => panic!("expected invalid input error, got {other:?}"),
+        Ok(_) => panic!("expected error for unknown model without dim, got ok"),
+    }
 }
 
 #[tokio::test]
@@ -264,7 +377,7 @@ async fn schedules_crud_and_trigger() {
 
     let client = test_client(&server.uri());
 
-    let page = client.schedules().list(10, 0).await.expect("list");
+    let page = client.schedules().list((10, 0)).await.expect("list");
     assert_eq!(page.total, 1);
     assert_eq!(page.schedules[0].id, "sch_1");
 
@@ -310,4 +423,273 @@ fn file_upload_source_defaults() {
     assert_eq!(req.name, "rust-sdk-file-upload");
     assert_eq!(req.config["storage_provider"], "s3");
     assert_eq!(req.config["sync_mode"], "full");
+}
+
+#[test]
+fn confluence_source_builds_config_and_default_name() {
+    let req: CreateSourceRequest = ConfluenceSource {
+        base_url: Some("https://acme.atlassian.net".into()),
+        username: Some("bot@acme.com".into()),
+        api_token: Some("token".into()),
+        spaces: vec!["ENG".into(), "DOCS".into()],
+        ..Default::default()
+    }
+    .into_create_source_request();
+
+    assert_eq!(req.source_type, "confluence");
+    assert_eq!(req.config["type"], "confluence");
+    assert_eq!(req.config["auth_mode"], "basic");
+    assert_eq!(req.config["sync_mode"], "incremental");
+    assert_eq!(req.config["include_attachments"], false);
+    assert_eq!(req.config["base_url"], "https://acme.atlassian.net");
+    assert_eq!(req.config["username"], "bot@acme.com");
+    assert_eq!(req.config["spaces"], json!(["ENG", "DOCS"]));
+    // Name derives from the first space.
+    assert_eq!(req.name, "confluence-eng");
+}
+
+#[test]
+fn confluence_source_name_falls_back_to_host_then_cloud_id() {
+    let from_host: CreateSourceRequest = ConfluenceSource {
+        base_url: Some("https://acme.atlassian.net".into()),
+        ..Default::default()
+    }
+    .into_create_source_request();
+    assert_eq!(from_host.name, "confluence-acme-atlassian-net");
+
+    let from_cloud: CreateSourceRequest = ConfluenceSource {
+        cloud_id: Some("cloud-123".into()),
+        ..Default::default()
+    }
+    .into_create_source_request();
+    assert_eq!(from_cloud.name, "confluence-cloud-123");
+}
+
+#[tokio::test]
+async fn create_confluence_source_posts_to_ingestion_sources() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/ingestion/sources"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "src_conf",
+            "name": "confluence-eng",
+            "source_type": "confluence"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let source = client
+        .sources()
+        .create_confluence(ConfluenceSource {
+            cloud_id: Some("cloud-1".into()),
+            spaces: vec!["ENG".into()],
+            ..Default::default()
+        })
+        .await
+        .expect("created");
+    assert_eq!(source.identifier(), Some("src_conf"));
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["source_type"], "confluence");
+    assert_eq!(body["config"]["cloud_id"], "cloud-1");
+}
+
+#[tokio::test]
+async fn insert_uses_insert_endpoint_and_preserves_numeric_ids() {
+    let server = MockServer::start().await;
+    // The endpoint is /insert (never /vectors).
+    Mock::given(method("POST"))
+        .and(path("/datasets/ds_1/insert"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"inserted": 2})))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resp = client
+        .datasets()
+        .insert(
+            "ds_1",
+            vec![
+                Vector::new(42, vec![0.1, 0.2]),
+                Vector::new("doc-9", vec![0.3, 0.4]),
+            ],
+        )
+        .await
+        .expect("insert ok");
+    assert_eq!(resp.inserted, 2);
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    let vectors = body["vectors"].as_array().expect("vectors array");
+    // Numeric id serialized as a JSON number, not a string.
+    assert_eq!(vectors[0]["id"], json!(42));
+    assert!(vectors[0]["id"].is_number());
+    // String ids stay strings.
+    assert_eq!(vectors[1]["id"], json!("doc-9"));
+    assert!(vectors[1]["id"].is_string());
+}
+
+#[test]
+fn vector_id_serializes_int_as_number_and_str_as_string() {
+    let int_id = serde_json::to_value(VectorId::Int(7)).unwrap();
+    assert_eq!(int_id, json!(7));
+    assert!(int_id.is_number());
+
+    let str_id = serde_json::to_value(VectorId::from("abc")).unwrap();
+    assert_eq!(str_id, json!("abc"));
+    assert!(str_id.is_string());
+
+    // From<integer> conversions land on the numeric variant.
+    let from_u64: VectorId = 99u64.into();
+    assert_eq!(serde_json::to_value(from_u64).unwrap(), json!(99));
+}
+
+#[tokio::test]
+async fn list_datasets_defaults_pagination() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/datasets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "datasets": [],
+            "total": 0,
+            "limit": 50,
+            "offset": 0
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    // No pagination args required.
+    client.datasets().list(()).await.expect("list ok");
+
+    let received = server.received_requests().await.unwrap();
+    let query = received[0].url.query().unwrap_or("");
+    assert!(query.contains("limit=50"), "default limit applied: {query}");
+}
+
+#[tokio::test]
+async fn intelligence_sessions_lifecycle() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/intelligence/sessions"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "sess_1",
+            "title": "Launch planning",
+            "status": "active"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/intelligence/sessions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "sessions": [{"id": "sess_1", "title": "Launch planning"}]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/intelligence/sessions/sess_1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "sess_1", "title": "Launch planning", "status": "active"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/intelligence/sessions/sess_1/messages"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "msg_1", "session_id": "sess_1", "role": "user", "content": "Hello"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/intelligence/sessions/sess_1/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "messages": [{"id": "msg_1", "role": "user", "content": "Hello"}]
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+
+    let created = client
+        .intelligence()
+        .create_session("Launch planning")
+        .await
+        .expect("create session");
+    assert_eq!(created.id, "sess_1");
+
+    let sessions = client
+        .intelligence()
+        .list_sessions(())
+        .await
+        .expect("list sessions");
+    assert_eq!(sessions.sessions.len(), 1);
+    assert_eq!(sessions.sessions[0].id, "sess_1");
+
+    let one = client
+        .intelligence()
+        .get_session("sess_1")
+        .await
+        .expect("get session");
+    assert_eq!(one.id, "sess_1");
+
+    let msg = client
+        .intelligence()
+        .append_message("sess_1", "user", "Hello")
+        .await
+        .expect("append message");
+    assert_eq!(msg.id, "msg_1");
+    assert_eq!(msg.role, "user");
+
+    let messages = client
+        .intelligence()
+        .list_messages("sess_1", ())
+        .await
+        .expect("list messages");
+    assert_eq!(messages.messages.len(), 1);
+    assert_eq!(messages.messages[0].content, "Hello");
+
+    // Verify the create session body carried the title.
+    let received = server.received_requests().await.unwrap();
+    let create_req = received
+        .iter()
+        .find(|r| r.method.as_str() == "POST" && r.url.path() == "/intelligence/sessions")
+        .expect("create request");
+    let body: serde_json::Value = serde_json::from_slice(&create_req.body).expect("json body");
+    assert_eq!(body["title"], "Launch planning");
+}
+
+#[tokio::test]
+async fn dataset_ask_stream_targets_intelligence_with_stream_true() {
+    let server = MockServer::start().await;
+    let sse = "event: chunk\ndata: {\"chunk_type\":\"text\",\"content\":\"Hi\"}\n\n";
+    Mock::given(method("POST"))
+        .and(path("/intelligence/query"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse),
+        )
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let mut stream = client
+        .datasets()
+        .ask_stream("ds_1", "hello")
+        .await
+        .expect("stream opens");
+    let mut text = String::new();
+    while let Some(event) = stream.next_event().await.expect("event") {
+        if event.chunk_type == "text" {
+            text.push_str(&event.content);
+        }
+    }
+    assert_eq!(text, "Hi");
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["dataset_id"], "ds_1");
 }

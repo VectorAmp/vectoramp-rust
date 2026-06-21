@@ -12,14 +12,65 @@ use crate::intelligence::AskOptions;
 use crate::sources::IntoCreateSourceRequest;
 use crate::transport::Request;
 use crate::types::{
-    AddTextsResponse, AskRequest, AskResponse, CreateDatasetRequest, DatasetDocumentList,
-    DatasetInfo, DatasetList, DocumentListOpts, EmbedRequest, EmbedResponse, InsertVectorsRequest,
-    InsertVectorsResponse, Job, Metadata, Rerank, RerankConfig, SearchRequest, SearchResponse,
-    TextDocument, Vector,
+    infer_embedding_dim, AddTextsResponse, AskResponse, CreateDatasetRequest, DatasetDocumentList,
+    DatasetInfo, DatasetList, DocumentListOpts, EmbedRequest, EmbedResponse, EmbeddingConfig,
+    InsertVectorsRequest, InsertVectorsResponse, Job, Metadata, Rerank, RerankConfig,
+    SearchRequest, SearchResponse, TextDocument, Vector, VectorId, DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_PROVIDER,
 };
 
 /// Default search top_k applied when one is not supplied.
 pub const DEFAULT_SEARCH_TOP_K: u32 = 10;
+
+/// Default page size used by list helpers when no limit is supplied.
+pub const DEFAULT_PAGE_LIMIT: u32 = 50;
+
+/// Pagination argument accepted by the `list*` helpers.
+///
+/// Implements `From` for `()` (defaults), `(u32, u32)` for explicit
+/// `(limit, offset)`, and `u32` for just a limit, so callers can write
+/// `list(())`, `list((50, 0))`, or `list(50)` interchangeably without ever
+/// being forced to spell out a default page size.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Pagination {
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+impl Pagination {
+    /// Resolve the effective `(limit, offset)`, applying the default page
+    /// limit when no limit was supplied.
+    pub(crate) fn resolve(self) -> (u32, u32) {
+        (
+            self.limit.unwrap_or(DEFAULT_PAGE_LIMIT),
+            self.offset.unwrap_or(0),
+        )
+    }
+}
+
+impl From<()> for Pagination {
+    fn from(_: ()) -> Self {
+        Pagination::default()
+    }
+}
+
+impl From<u32> for Pagination {
+    fn from(limit: u32) -> Self {
+        Pagination {
+            limit: Some(limit),
+            offset: None,
+        }
+    }
+}
+
+impl From<(u32, u32)> for Pagination {
+    fn from((limit, offset): (u32, u32)) -> Self {
+        Pagination {
+            limit: Some(limit),
+            offset: Some(offset),
+        }
+    }
+}
 
 /// Service for managing datasets and dataset-scoped operations.
 #[derive(Clone)]
@@ -32,9 +83,22 @@ impl DatasetService {
         Self { client }
     }
 
-    /// List datasets with optional limit and offset pagination. Pass 0 to omit
-    /// either parameter.
-    pub async fn list(&self, limit: u32, offset: u32) -> Result<DatasetList> {
+    /// List datasets.
+    ///
+    /// Pagination is optional: pass `()` for sensible defaults
+    /// (limit [`DEFAULT_PAGE_LIMIT`], offset 0), a `(limit, offset)` tuple, or a
+    /// bare `limit`.
+    ///
+    /// ```no_run
+    /// # async fn run(client: vectoramp::Client) -> vectoramp::Result<()> {
+    /// let all = client.datasets().list(()).await?;        // defaults
+    /// let page = client.datasets().list((50, 0)).await?;  // explicit
+    /// # let _ = (all, page);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn list<P: Into<Pagination>>(&self, pagination: P) -> Result<DatasetList> {
+        let (limit, offset) = pagination.into().resolve();
         let mut req = Request {
             method: "GET".into(),
             path: "/datasets".into(),
@@ -60,9 +124,33 @@ impl DatasetService {
 
     /// Create a SABLE dataset and return a bound [`Dataset`] resource.
     ///
-    /// Public dataset creation is SABLE-only; the SDK always sends
-    /// `index_type: "sable"`.
-    pub async fn create(&self, request: CreateDatasetRequest) -> Result<Dataset> {
+    /// Accepts anything convertible into a [`CreateDatasetRequest`]: a bare name
+    /// (`create("docs")`), a [`CreateDatasetBuilder`](crate::CreateDatasetBuilder)
+    /// (`create(CreateDatasetRequest::builder("docs").hybrid(true))`), or a full
+    /// [`CreateDatasetRequest`].
+    ///
+    /// With only a name, the SDK defaults the embedding to
+    /// `VectorAmp-Embedding-4B` (provider `vectoramp`), infers `dim` (`2560`),
+    /// and defaults the metric to `cosine`. Public dataset creation is
+    /// SABLE-only; the SDK always sends `index_type: "sable"` and never exposes
+    /// it. Supplying a custom/unknown embedding model without a `dim` is an
+    /// error.
+    ///
+    /// ```no_run
+    /// # use vectoramp::CreateDatasetRequest;
+    /// # async fn run(client: vectoramp::Client) -> vectoramp::Result<()> {
+    /// let ds = client.datasets().create("docs").await?;               // minimal
+    /// let hy = client.datasets()
+    ///     .create(CreateDatasetRequest::builder("docs").hybrid(true)) // hybrid
+    ///     .await?;
+    /// # let _ = (ds, hy);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn create<R: Into<CreateDatasetRequest>>(&self, request: R) -> Result<Dataset> {
+        let mut request = request.into();
+        self.apply_create_defaults(&mut request)?;
+
         let mut body = serde_json::to_value(&request)?;
         if let Value::Object(ref mut map) = body {
             map.insert("index_type".into(), Value::String("sable".into()));
@@ -78,6 +166,44 @@ impl DatasetService {
             })
             .await?;
         Ok(Dataset::new(self.client.clone(), info))
+    }
+
+    /// Fill in the SDK-side defaults for a create request: default embedding,
+    /// inferred dimension, and default metric.
+    fn apply_create_defaults(&self, request: &mut CreateDatasetRequest) -> Result<()> {
+        // Default the embedding when one was not supplied.
+        let embedding = request
+            .embedding
+            .get_or_insert_with(EmbeddingConfig::vectoramp);
+        if embedding.provider.is_none() {
+            embedding.provider = Some(DEFAULT_EMBEDDING_PROVIDER.into());
+        }
+        if embedding.model.is_none() {
+            embedding.model = Some(DEFAULT_EMBEDDING_MODEL.into());
+        }
+
+        // Infer the dimension from the embedding model when not given.
+        if request.dim.is_none() {
+            let provider = request
+                .embedding
+                .as_ref()
+                .and_then(|e| e.provider.as_deref());
+            let model = request.embedding.as_ref().and_then(|e| e.model.as_deref());
+            match infer_embedding_dim(provider, model) {
+                Some(dim) => request.dim = Some(dim),
+                None => {
+                    return Err(Error::invalid_input(format!(
+                        "could not infer dim for embedding model {:?}; pass dim explicitly via CreateDatasetRequest::builder(name).dim(n)",
+                        model.unwrap_or(DEFAULT_EMBEDDING_MODEL)
+                    )));
+                }
+            }
+        }
+
+        if request.metric.is_none() {
+            request.metric = Some("cosine".into());
+        }
+        Ok(())
     }
 
     /// Delete a dataset by ID.
@@ -194,6 +320,9 @@ impl DatasetService {
     }
 
     /// Insert vectors into a dataset.
+    ///
+    /// Vector ids accept strings or integers (see [`VectorId`]); integer ids are
+    /// serialized as JSON numbers so the API preserves them.
     pub async fn insert(
         &self,
         dataset_id: &str,
@@ -209,6 +338,16 @@ impl DatasetService {
                 ..Default::default()
             })
             .await
+    }
+
+    /// Alias for [`DatasetService::insert`] matching the cross-language
+    /// `insertVectors` name.
+    pub async fn insert_vectors(
+        &self,
+        dataset_id: &str,
+        vectors: Vec<Vector>,
+    ) -> Result<InsertVectorsResponse> {
+        self.insert(dataset_id, vectors).await
     }
 
     /// Generate embeddings using the dataset embedding configuration.
@@ -248,7 +387,7 @@ impl DatasetService {
                 .into_iter()
                 .enumerate()
                 .map(|(i, text)| TextDocument {
-                    id: format!("text-{}", i + 1),
+                    id: VectorId::Str(format!("text-{}", i + 1)),
                     text,
                     metadata: None,
                 })
@@ -375,6 +514,19 @@ impl DatasetService {
         self.client
             .intelligence()
             .ask_with(query.into(), options)
+            .await
+    }
+
+    /// Open a streaming intelligence query scoped to one dataset.
+    pub async fn ask_stream<S: Into<String>>(
+        &self,
+        dataset_id: &str,
+        query: S,
+    ) -> Result<crate::intelligence::AskStream> {
+        let options = AskOptions::default().with_dataset(dataset_id.to_owned());
+        self.client
+            .intelligence()
+            .stream(query.into(), options)
             .await
     }
 }
@@ -517,6 +669,12 @@ impl Dataset {
         self.client.datasets().insert(self.id(), vectors).await
     }
 
+    /// Alias for [`Dataset::insert`] matching the cross-language `insertVectors`
+    /// name.
+    pub async fn insert_vectors(&self, vectors: Vec<Vector>) -> Result<InsertVectorsResponse> {
+        self.client.datasets().insert(self.id(), vectors).await
+    }
+
     /// Embed and insert texts into this dataset.
     pub async fn add_texts<I: Into<AddTextsInput>>(&self, input: I) -> Result<AddTextsResponse> {
         self.client.datasets().add_texts(self.id(), input).await
@@ -554,6 +712,14 @@ impl Dataset {
             .datasets()
             .ask_with(self.id(), query, options)
             .await
+    }
+
+    /// Open a streaming intelligence query scoped to this dataset.
+    pub async fn ask_stream<S: Into<String>>(
+        &self,
+        query: S,
+    ) -> Result<crate::intelligence::AskStream> {
+        self.client.datasets().ask_stream(self.id(), query).await
     }
 
     /// List retained source documents.
@@ -628,8 +794,3 @@ pub(crate) fn push_pagination(query: &mut Vec<(String, String)>, limit: u32, off
         query.push(("offset".into(), offset.to_string()));
     }
 }
-
-// Surfaces unused imports if any helper pieces aren't actually used; this is a
-// deliberate no-op to keep the module organized.
-#[allow(dead_code)]
-fn _ensure_used(_: &AskRequest) {}

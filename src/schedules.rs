@@ -1,7 +1,7 @@
 //! Recurring ingestion schedules.
 
 use crate::client::Client;
-use crate::datasets::push_pagination;
+use crate::datasets::{push_pagination, Pagination};
 use crate::errors::Result;
 use crate::transport::Request;
 use crate::types::{
@@ -23,8 +23,12 @@ impl ScheduleService {
         Self { client }
     }
 
-    /// List schedules with optional `limit` and `offset` pagination.
-    pub async fn list(&self, limit: u32, offset: u32) -> Result<ScheduleList> {
+    /// List schedules.
+    ///
+    /// Pagination is optional: pass `()` for defaults, a `(limit, offset)`
+    /// tuple, or a bare `limit`.
+    pub async fn list<P: Into<Pagination>>(&self, pagination: P) -> Result<ScheduleList> {
+        let (limit, offset) = pagination.into().resolve();
         let mut req = Request {
             method: "GET".into(),
             path: "/ingestion/schedules".into(),
