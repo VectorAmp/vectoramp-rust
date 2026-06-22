@@ -6,9 +6,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::client::Client;
+use crate::datasets::{push_pagination, Pagination};
 use crate::errors::{Error, Result};
 use crate::transport::Request;
-use crate::types::{AskRequest, AskResponse, ConversationMessage, Metadata};
+use crate::types::{
+    AppendMessageRequest, AskRequest, AskResponse, ConversationMessage, CreateSessionRequest,
+    IntelligenceSession, MessageList, Metadata, SessionList, SessionMessage,
+};
 
 /// Optional knobs passed to [`IntelligenceService::ask_with`].
 #[derive(Debug, Default, Clone)]
@@ -124,6 +128,120 @@ impl IntelligenceService {
             })
             .await?;
         Ok(AskStream::new(stream))
+    }
+
+    /// Create a new intelligence session.
+    ///
+    /// Pass `()` for an empty session, or a [`CreateSessionRequest`] (also
+    /// accepts a bare title via `&str`/`String`) to set a title, dataset scope,
+    /// or metadata.
+    pub async fn create_session<R: Into<CreateSessionRequest>>(
+        &self,
+        request: R,
+    ) -> Result<IntelligenceSession> {
+        let body = serde_json::to_value(request.into())?;
+        self.client
+            .dispatcher()
+            .json(Request {
+                method: "POST".into(),
+                path: "/intelligence/sessions".into(),
+                body: Some(body),
+                ..Default::default()
+            })
+            .await
+    }
+
+    /// List intelligence sessions.
+    ///
+    /// Pagination is optional: pass `()` for defaults or a bare `limit`.
+    pub async fn list_sessions<P: Into<Pagination>>(&self, pagination: P) -> Result<SessionList> {
+        let (limit, _offset) = pagination.into().resolve();
+        let mut req = Request {
+            method: "GET".into(),
+            path: "/intelligence/sessions".into(),
+            ..Default::default()
+        };
+        // The sessions endpoint paginates by `limit` only.
+        push_pagination(&mut req.query, limit, 0);
+        self.client.dispatcher().json(req).await
+    }
+
+    /// Fetch one intelligence session by id.
+    pub async fn get_session(&self, session_id: &str) -> Result<IntelligenceSession> {
+        self.client
+            .dispatcher()
+            .json(Request {
+                method: "GET".into(),
+                path: format!("/intelligence/sessions/{session_id}"),
+                ..Default::default()
+            })
+            .await
+    }
+
+    /// Delete an intelligence session.
+    pub async fn delete_session(&self, session_id: &str) -> Result<()> {
+        self.client
+            .dispatcher()
+            .empty(Request {
+                method: "DELETE".into(),
+                path: format!("/intelligence/sessions/{session_id}"),
+                ..Default::default()
+            })
+            .await
+    }
+
+    /// Append a message to a session.
+    pub async fn append_message<S: Into<String>, C: Into<String>>(
+        &self,
+        session_id: &str,
+        role: S,
+        content: C,
+    ) -> Result<SessionMessage> {
+        self.append_message_with(
+            session_id,
+            AppendMessageRequest {
+                role: role.into(),
+                content: content.into(),
+                metadata: None,
+            },
+        )
+        .await
+    }
+
+    /// Append a message to a session with explicit metadata.
+    pub async fn append_message_with(
+        &self,
+        session_id: &str,
+        request: AppendMessageRequest,
+    ) -> Result<SessionMessage> {
+        let body = serde_json::to_value(&request)?;
+        self.client
+            .dispatcher()
+            .json(Request {
+                method: "POST".into(),
+                path: format!("/intelligence/sessions/{session_id}/messages"),
+                body: Some(body),
+                ..Default::default()
+            })
+            .await
+    }
+
+    /// List messages in a session.
+    ///
+    /// Pagination is optional: pass `()` for defaults or a bare `limit`.
+    pub async fn list_messages<P: Into<Pagination>>(
+        &self,
+        session_id: &str,
+        pagination: P,
+    ) -> Result<MessageList> {
+        let (limit, _offset) = pagination.into().resolve();
+        let mut req = Request {
+            method: "GET".into(),
+            path: format!("/intelligence/sessions/{session_id}/messages"),
+            ..Default::default()
+        };
+        push_pagination(&mut req.query, limit, 0);
+        self.client.dispatcher().json(req).await
     }
 }
 

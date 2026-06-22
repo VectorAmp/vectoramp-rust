@@ -7,7 +7,7 @@ use url::Url;
 use crate::datasets::DatasetService;
 use crate::errors::Result;
 use crate::ingestion::IngestionService;
-use crate::intelligence::{AskOptions, IntelligenceService};
+use crate::intelligence::{AskOptions, AskStream, IntelligenceService};
 use crate::schedules::ScheduleService;
 use crate::transport::{Dispatcher, RestTransport, Transport};
 use crate::types::AskResponse;
@@ -82,6 +82,15 @@ impl Client {
         options: AskOptions,
     ) -> Result<AskResponse> {
         self.intelligence().ask_with(query.into(), options).await
+    }
+
+    /// Open a streaming intelligence query across the API default scope.
+    ///
+    /// Use [`IntelligenceService::stream`] for explicit options.
+    pub async fn ask_stream<S: Into<String>>(&self, query: S) -> Result<AskStream> {
+        self.intelligence()
+            .stream(query.into(), AskOptions::default())
+            .await
     }
 
     pub(crate) fn dispatcher(&self) -> &Dispatcher {

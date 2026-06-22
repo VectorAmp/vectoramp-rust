@@ -10,24 +10,14 @@
 //! # Quick start
 //!
 //! ```no_run
-//! use vectoramp::{Client, CreateDatasetRequest, EmbeddingConfig};
+//! use vectoramp::Client;
 //!
 //! # async fn run() -> vectoramp::Result<()> {
 //! let client = Client::new(std::env::var("VECTORAMP_API_KEY").unwrap());
 //!
-//! let dataset = client
-//!     .datasets()
-//!     .create(CreateDatasetRequest {
-//!         name: "product-docs".into(),
-//!         dim: 2560,
-//!         metric: Some("cosine".into()),
-//!         embedding: Some(EmbeddingConfig {
-//!             provider: Some("vectoramp".into()),
-//!             model: Some("VectorAmp-Embedding-2560".into()),
-//!         }),
-//!         ..Default::default()
-//!     })
-//!     .await?;
+//! // Only a name is required: embedding defaults to VectorAmp-Embedding-4B,
+//! // dim is inferred (2560), metric defaults to cosine, index is SABLE.
+//! let dataset = client.datasets().create("product-docs").await?;
 //!
 //! dataset.add_texts(vec!["VectorAmp is a high-performance vector database."]).await?;
 //!
@@ -48,14 +38,17 @@ pub mod transport;
 pub mod types;
 
 pub use client::{Client, ClientBuilder};
-pub use datasets::{AddTextsOptions, Dataset, DatasetService, SearchInput, SearchOptions};
+pub use datasets::{
+    AddTextsOptions, Dataset, DatasetService, Pagination, SearchInput, SearchOptions,
+    DEFAULT_PAGE_LIMIT, DEFAULT_SEARCH_TOP_K,
+};
 pub use errors::{ApiError, Error, Result};
 pub use ingestion::{DocumentListOptions, IngestFilesOptions, IngestionService};
 pub use intelligence::{AskOptions, AskStream, IntelligenceService, StreamEvent};
 pub use schedules::ScheduleService;
 pub use sources::{
-    FileUploadSource, GcsSource, GenericSource, GoogleDriveSource, IntoCreateSourceRequest,
-    JiraSource, S3Source, WebSelectors, WebSource,
+    ConfluenceSource, FileUploadSource, GcsSource, GenericSource, GoogleDriveSource,
+    IntoCreateSourceRequest, JiraSource, S3Source, WebSelectors, WebSource,
 };
 pub use transport::{Request, Response, Transport};
 pub use types::*;

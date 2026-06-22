@@ -18,6 +18,7 @@ pub mod source_type {
     pub const GCS: &str = "gcs";
     pub const GDRIVE: &str = "gdrive";
     pub const JIRA: &str = "jira";
+    pub const CONFLUENCE: &str = "confluence";
     pub const FILE_UPLOAD: &str = "file_upload";
 }
 
@@ -510,6 +511,96 @@ impl IntoCreateSourceRequest for JiraSource {
             metadata: self.metadata,
         }
     }
+}
+
+/// Confluence ingestion source (spaces and pages).
+///
+/// Provide either `cloud_id` (Atlassian OAuth site id) or `base_url`
+/// (e.g. `https://company.atlassian.net`). `auth_mode` defaults to `basic`
+/// (`username` + `api_token`); pass `oauth_credentials` for OAuth.
+#[derive(Debug, Default, Clone)]
+pub struct ConfluenceSource {
+    pub name: Option<String>,
+    pub cloud_id: Option<String>,
+    pub base_url: Option<String>,
+    pub auth_mode: Option<String>,
+    pub username: Option<String>,
+    pub api_token: Option<String>,
+    pub oauth_credentials: Option<HashMap<String, Value>>,
+    pub spaces: Vec<String>,
+    pub include_attachments: Option<bool>,
+    pub sync_mode: Option<String>,
+    pub description: Option<String>,
+    pub metadata: Option<Metadata>,
+    pub config_extra: HashMap<String, Value>,
+}
+
+impl IntoCreateSourceRequest for ConfluenceSource {
+    fn into_create_source_request(self) -> CreateSourceRequest {
+        let mut config: HashMap<String, Value> = HashMap::new();
+        config.insert("type".into(), Value::String(source_type::CONFLUENCE.into()));
+        config.insert(
+            "auth_mode".into(),
+            Value::String(self.auth_mode.unwrap_or_else(|| "basic".into())),
+        );
+        config.insert(
+            "include_attachments".into(),
+            Value::Bool(self.include_attachments.unwrap_or(false)),
+        );
+        config.insert(
+            "sync_mode".into(),
+            Value::String(self.sync_mode.unwrap_or_else(|| "incremental".into())),
+        );
+        if let Some(v) = &self.cloud_id {
+            config.insert("cloud_id".into(), Value::String(v.clone()));
+        }
+        if let Some(v) = &self.base_url {
+            config.insert("base_url".into(), Value::String(v.clone()));
+        }
+        if let Some(v) = self.username {
+            config.insert("username".into(), Value::String(v));
+        }
+        if let Some(v) = self.api_token {
+            config.insert("api_token".into(), Value::String(v));
+        }
+        if let Some(v) = self.oauth_credentials {
+            config.insert("oauth_credentials".into(), json!(v));
+        }
+        if !self.spaces.is_empty() {
+            config.insert("spaces".into(), json!(self.spaces));
+        }
+        merge_extra(&mut config, self.config_extra);
+
+        let hint = self
+            .spaces
+            .first()
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .or_else(|| confluence_host(self.base_url.as_deref()))
+            .or_else(|| self.cloud_id.clone());
+        let name = self.name.unwrap_or_else(|| match hint {
+            Some(h) if !h.is_empty() => format!("confluence-{}", sanitize(&h)),
+            _ => "rust-sdk-confluence-source".into(),
+        });
+
+        CreateSourceRequest {
+            source_type: source_type::CONFLUENCE.into(),
+            name,
+            description: self.description,
+            config,
+            metadata: self.metadata,
+        }
+    }
+}
+
+fn confluence_host(base_url: Option<&str>) -> Option<String> {
+    let url = base_url?;
+    if let Ok(parsed) = url::Url::parse(url) {
+        if let Some(host) = parsed.host_str() {
+            return Some(host.to_owned());
+        }
+    }
+    None
 }
 
 fn merge_extra(config: &mut HashMap<String, Value>, extra: HashMap<String, Value>) {

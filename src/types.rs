@@ -8,6 +8,13 @@ use serde_json::Value;
 /// Free-form key/value metadata attached to resources and results.
 pub type Metadata = HashMap<String, Value>;
 
+/// Default embedding provider used when a dataset is created without one.
+pub const DEFAULT_EMBEDDING_PROVIDER: &str = "vectoramp";
+/// Default embedding model used when a dataset is created without one.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "VectorAmp-Embedding-4B";
+/// Inferred dimensionality of [`DEFAULT_EMBEDDING_MODEL`].
+pub const DEFAULT_EMBEDDING_DIM: u32 = 2560;
+
 /// Embedding provider/model selector attached to a dataset.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct EmbeddingConfig {
@@ -15,6 +22,50 @@ pub struct EmbeddingConfig {
     pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+}
+
+impl EmbeddingConfig {
+    /// VectorAmp default embedding (`VectorAmp-Embedding-4B`, dim `2560`).
+    pub fn vectoramp() -> Self {
+        Self {
+            provider: Some(DEFAULT_EMBEDDING_PROVIDER.into()),
+            model: Some(DEFAULT_EMBEDDING_MODEL.into()),
+        }
+    }
+
+    /// OpenAI embedding helper. Accepts the shorthands `"small"` /`"large"` or
+    /// a full model id such as `text-embedding-3-small`.
+    pub fn openai<S: Into<String>>(model: S) -> Self {
+        let model = match model.into().as_str() {
+            "small" => "text-embedding-3-small".to_string(),
+            "large" => "text-embedding-3-large".to_string(),
+            other => other.to_string(),
+        };
+        Self {
+            provider: Some("openai".into()),
+            model: Some(model),
+        }
+    }
+}
+
+/// Infer the embedding dimensionality from a `provider`/`model` pair using the
+/// built-in table. Returns `None` for custom/unknown models, in which case the
+/// caller must supply `dim` explicitly.
+///
+/// Known: `vectoramp/VectorAmp-Embedding-4B` → 2560,
+/// `openai/text-embedding-3-small` → 1536, `openai/text-embedding-3-large` →
+/// 3072.
+pub fn infer_embedding_dim(provider: Option<&str>, model: Option<&str>) -> Option<u32> {
+    match (provider, model) {
+        (_, Some(DEFAULT_EMBEDDING_MODEL)) => Some(DEFAULT_EMBEDDING_DIM),
+        (Some("openai"), Some("text-embedding-3-small")) => Some(1536),
+        (Some("openai"), Some("text-embedding-3-large")) => Some(3072),
+        // Allow inference even when the provider is omitted but the model is a
+        // well-known OpenAI model.
+        (_, Some("text-embedding-3-small")) => Some(1536),
+        (_, Some("text-embedding-3-large")) => Some(3072),
+        _ => None,
+    }
 }
 
 /// VectorAmp dataset returned by the API.
@@ -58,29 +109,211 @@ pub struct DatasetList {
 
 /// Request body for [`DatasetService::create`](crate::DatasetService::create).
 ///
-/// `name` and `dim` are required by the API. The SDK always sends
-/// `index_type: "sable"` since public dataset creation is SABLE-only.
+/// Only `name` is required. When `dim` is omitted the SDK infers it from the
+/// embedding model (defaulting to `VectorAmp-Embedding-4B` → `2560`). The SDK
+/// always sends `index_type: "sable"` since public dataset creation is
+/// SABLE-only and never exposes the index type.
+///
+/// Prefer the [`DatasetService::create`](crate::DatasetService::create) helper
+/// (`create("name")`) or [`CreateDatasetRequest::builder`] over filling this
+/// struct manually.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CreateDatasetRequest {
     pub name: String,
-    pub dim: u32,
+    /// Embedding dimensionality. Optional: inferred from the embedding model
+    /// when omitted. Serialized as `dim` (never `dimension`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dim: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tuning: Option<HashMap<String, Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding: Option<EmbeddingConfig>,
+    /// Enable hybrid (dense + sparse) indexing. Maps to `hybrid: true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hybrid: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
 }
 
+impl CreateDatasetRequest {
+    /// Start a builder for a dataset with the given name. Everything else is
+    /// optional and defaulted server-side or by the SDK.
+    pub fn builder<S: Into<String>>(name: S) -> CreateDatasetBuilder {
+        CreateDatasetBuilder::new(name)
+    }
+}
+
+/// Fluent builder for [`CreateDatasetRequest`].
+///
+/// Only the dataset name is required. The default embedding is
+/// `VectorAmp-Embedding-4B` (provider `vectoramp`), dim is inferred (`2560`),
+/// and metric defaults to `cosine`.
+#[derive(Debug, Clone)]
+pub struct CreateDatasetBuilder {
+    request: CreateDatasetRequest,
+}
+
+impl CreateDatasetBuilder {
+    /// Begin building a create request for `name`.
+    pub fn new<S: Into<String>>(name: S) -> Self {
+        Self {
+            request: CreateDatasetRequest {
+                name: name.into(),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Set the embedding dimensionality explicitly. Required only for
+    /// custom/unknown embedding models the SDK cannot infer.
+    pub fn dim(mut self, dim: u32) -> Self {
+        self.request.dim = Some(dim);
+        self
+    }
+
+    /// Set the distance metric (defaults to `cosine`).
+    pub fn metric<S: Into<String>>(mut self, metric: S) -> Self {
+        self.request.metric = Some(metric.into());
+        self
+    }
+
+    /// Set the embedding provider/model.
+    pub fn embedding(mut self, embedding: EmbeddingConfig) -> Self {
+        self.request.embedding = Some(embedding);
+        self
+    }
+
+    /// Use an OpenAI embedding model. Accepts `"small"`/`"large"` (or the full
+    /// model id). Dimensionality is inferred (`1536`/`3072`).
+    pub fn openai<S: Into<String>>(mut self, model: S) -> Self {
+        self.request.embedding = Some(EmbeddingConfig::openai(model));
+        self
+    }
+
+    /// Enable hybrid (dense + sparse) indexing.
+    pub fn hybrid(mut self, hybrid: bool) -> Self {
+        self.request.hybrid = Some(hybrid);
+        self
+    }
+
+    /// Attach arbitrary metadata to the dataset.
+    pub fn metadata(mut self, metadata: Metadata) -> Self {
+        self.request.metadata = Some(metadata);
+        self
+    }
+
+    /// Finish building. The SDK fills in defaults and dim inference at create
+    /// time.
+    pub fn build(self) -> CreateDatasetRequest {
+        self.request
+    }
+}
+
+impl From<CreateDatasetBuilder> for CreateDatasetRequest {
+    fn from(b: CreateDatasetBuilder) -> Self {
+        b.build()
+    }
+}
+
+impl From<&str> for CreateDatasetRequest {
+    fn from(name: &str) -> Self {
+        CreateDatasetRequest {
+            name: name.to_owned(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<String> for CreateDatasetRequest {
+    fn from(name: String) -> Self {
+        CreateDatasetRequest {
+            name,
+            ..Default::default()
+        }
+    }
+}
+
+/// Identifier for a vector record.
+///
+/// A vector id may be a string **or** an integer. Integer ids are serialized as
+/// JSON numbers (not strings) so the API preserves their numeric type and does
+/// not rewrite them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum VectorId {
+    /// Integer id, serialized as a JSON number.
+    Int(i64),
+    /// String id, serialized as a JSON string.
+    Str(String),
+}
+
+impl Default for VectorId {
+    fn default() -> Self {
+        VectorId::Str(String::new())
+    }
+}
+
+impl std::fmt::Display for VectorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VectorId::Int(n) => write!(f, "{n}"),
+            VectorId::Str(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl From<String> for VectorId {
+    fn from(s: String) -> Self {
+        VectorId::Str(s)
+    }
+}
+
+impl From<&str> for VectorId {
+    fn from(s: &str) -> Self {
+        VectorId::Str(s.to_owned())
+    }
+}
+
+macro_rules! vector_id_from_int {
+    ($($t:ty),*) => {$(
+        impl From<$t> for VectorId {
+            fn from(n: $t) -> Self {
+                VectorId::Int(n as i64)
+            }
+        }
+    )*};
+}
+vector_id_from_int!(i8, i16, i32, i64, u8, u16, u32, u64, usize, isize);
+
 /// One vector record to insert into a dataset.
+///
+/// The `id` accepts a string or integer via [`VectorId`]; integer ids are
+/// preserved as JSON numbers on the wire.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Vector {
-    pub id: String,
+    pub id: VectorId,
     pub values: Vec<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+}
+
+impl Vector {
+    /// Construct a vector from an id (string or integer) and values.
+    pub fn new<I: Into<VectorId>>(id: I, values: Vec<f64>) -> Self {
+        Self {
+            id: id.into(),
+            values,
+            metadata: None,
+        }
+    }
+
+    /// Attach metadata to the vector.
+    pub fn with_metadata(mut self, metadata: Metadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -96,9 +329,12 @@ pub struct InsertVectorsResponse {
 }
 
 /// One text document to be embedded and inserted by `add_texts`.
+///
+/// `id` accepts a string or integer via [`VectorId`]. When omitted in the
+/// convenience helpers the SDK generates `text-1`, `text-2`, … ids.
 #[derive(Debug, Default, Clone)]
 pub struct TextDocument {
-    pub id: String,
+    pub id: VectorId,
     pub text: String,
     pub metadata: Option<Metadata>,
 }
@@ -470,6 +706,108 @@ pub struct RagChunk {
     pub page: Option<Value>,
     #[serde(default)]
     pub metadata: Option<Metadata>,
+}
+
+/// Body for creating an intelligence session.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct CreateSessionRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
+}
+
+impl From<()> for CreateSessionRequest {
+    fn from(_: ()) -> Self {
+        CreateSessionRequest::default()
+    }
+}
+
+impl From<&str> for CreateSessionRequest {
+    fn from(title: &str) -> Self {
+        CreateSessionRequest {
+            title: Some(title.to_owned()),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<String> for CreateSessionRequest {
+    fn from(title: String) -> Self {
+        CreateSessionRequest {
+            title: Some(title),
+            ..Default::default()
+        }
+    }
+}
+
+/// An intelligence session: a durable container for a RAG conversation.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct IntelligenceSession {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub organization_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub dataset_id: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<Metadata>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Paginated list of intelligence sessions.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct SessionList {
+    #[serde(default)]
+    pub sessions: Vec<IntelligenceSession>,
+}
+
+/// Body for appending a message to an intelligence session.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct AppendMessageRequest {
+    pub role: String,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
+}
+
+/// One message stored in an intelligence session.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct SessionMessage {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub metadata: Option<Metadata>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+}
+
+/// Paginated list of session messages.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct MessageList {
+    #[serde(default)]
+    pub messages: Vec<SessionMessage>,
 }
 
 /// Cursor pagination options for dataset document listing.

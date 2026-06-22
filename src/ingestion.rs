@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::client::Client;
-use crate::datasets::push_pagination;
+use crate::datasets::{push_pagination, Pagination};
 use crate::errors::{Error, Result};
 use crate::sources::{sanitize, IntoCreateSourceRequest};
 use crate::transport::Request;
@@ -39,7 +39,11 @@ impl IngestionService {
     }
 
     /// List ingestion sources.
-    pub async fn list_sources(&self, limit: u32, offset: u32) -> Result<SourceList> {
+    ///
+    /// Pagination is optional: pass `()` for defaults, a `(limit, offset)`
+    /// tuple, or a bare `limit`.
+    pub async fn list_sources<P: Into<Pagination>>(&self, pagination: P) -> Result<SourceList> {
+        let (limit, offset) = pagination.into().resolve();
         let mut req = Request {
             method: "GET".into(),
             path: "/ingestion/sources".into(),
@@ -76,6 +80,55 @@ impl IngestionService {
             .await
     }
 
+    /// Create a web crawler source.
+    pub async fn create_web(&self, source: crate::sources::WebSource) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create an Amazon S3 source.
+    pub async fn create_s3(&self, source: crate::sources::S3Source) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a Google Cloud Storage source.
+    pub async fn create_gcs(&self, source: crate::sources::GcsSource) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a Google Drive source.
+    pub async fn create_google_drive(
+        &self,
+        source: crate::sources::GoogleDriveSource,
+    ) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a Jira source.
+    pub async fn create_jira(&self, source: crate::sources::JiraSource) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a Confluence source.
+    pub async fn create_confluence(
+        &self,
+        source: crate::sources::ConfluenceSource,
+    ) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a managed file-upload source.
+    pub async fn create_file_upload(
+        &self,
+        source: crate::sources::FileUploadSource,
+    ) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a source of any type via the generic escape hatch.
+    pub async fn create_generic(&self, source: crate::sources::GenericSource) -> Result<Source> {
+        self.create_source(source).await
+    }
+
     /// Start an ingestion job.
     pub async fn start_job(&self, request: StartIngestionRequest) -> Result<Job> {
         let body = serde_json::to_value(&request)?;
@@ -91,12 +144,15 @@ impl IngestionService {
     }
 
     /// List ingestion jobs, optionally filtered by `dataset_id`.
-    pub async fn list_jobs(
+    ///
+    /// Pagination is optional: pass `()` for defaults, a `(limit, offset)`
+    /// tuple, or a bare `limit`.
+    pub async fn list_jobs<P: Into<Pagination>>(
         &self,
         dataset_id: Option<&str>,
-        limit: u32,
-        offset: u32,
+        pagination: P,
     ) -> Result<JobList> {
+        let (limit, offset) = pagination.into().resolve();
         let mut req = Request {
             method: "GET".into(),
             path: "/ingestion/jobs".into(),
