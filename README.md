@@ -108,7 +108,8 @@ let client = Client::builder()
 ```rust
 use vectoramp::CreateDatasetRequest;
 
-// Minimal: name only (embedding + dim + metric defaulted/inferred).
+// Minimal: name only. Embedding config is omitted so VectorAmp uses
+// the managed VectorAmp-Embedding-4B model and infers dim 2560.
 let dataset = client.datasets().create("docs").await?;
 
 // Hybrid (dense + sparse) index.
@@ -117,10 +118,11 @@ let hybrid = client
     .create(CreateDatasetRequest::builder("docs").hybrid(true))
     .await?;
 
-// OpenAI embedding ("small" → 1536, "large" → 3072 inferred).
+// Optional BYOM: use OpenAI only when you intentionally want that provider
+// ("small" → 1536, "large" → 3072 inferred).
 let openai = client
     .datasets()
-    .create(CreateDatasetRequest::builder("docs").openai("small"))
+    .create(CreateDatasetRequest::builder("openai-docs").openai("small"))
     .await?;
 
 // Custom / unknown model requires an explicit dim.
