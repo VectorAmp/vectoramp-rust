@@ -22,6 +22,8 @@ pub struct EmbeddingConfig {
     pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_ref: Option<String>,
 }
 
 impl EmbeddingConfig {
@@ -30,6 +32,7 @@ impl EmbeddingConfig {
         Self {
             provider: Some(DEFAULT_EMBEDDING_PROVIDER.into()),
             model: Some(DEFAULT_EMBEDDING_MODEL.into()),
+            secret_ref: None,
         }
     }
 
@@ -44,6 +47,7 @@ impl EmbeddingConfig {
         Self {
             provider: Some("openai".into()),
             model: Some(model),
+            secret_ref: None,
         }
     }
 }
@@ -326,6 +330,22 @@ pub(crate) struct InsertVectorsRequest {
 pub struct InsertVectorsResponse {
     #[serde(default)]
     pub inserted: u32,
+}
+
+#[derive(Debug, Default, Clone, Serialize)]
+pub(crate) struct DeleteVectorsRequest {
+    pub ids: Vec<VectorId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_concern: Option<String>,
+}
+
+/// Number of vectors deleted by [`DatasetService::delete_vectors`](crate::DatasetService::delete_vectors).
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct DeleteVectorsResponse {
+    #[serde(default)]
+    pub deleted: u32,
+    #[serde(default)]
+    pub dataset_id: Option<String>,
 }
 
 /// One text document to be embedded and inserted by `add_texts`.

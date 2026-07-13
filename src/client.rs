@@ -9,6 +9,7 @@ use crate::errors::Result;
 use crate::ingestion::IngestionService;
 use crate::intelligence::{AskOptions, AskStream, IntelligenceService};
 use crate::schedules::ScheduleService;
+use crate::secrets::OrgSecretService;
 use crate::transport::{Dispatcher, RestTransport, Transport};
 use crate::types::AskResponse;
 use crate::{DEFAULT_BASE_URL, USER_AGENT};
@@ -60,6 +61,11 @@ impl Client {
     /// Recurring ingestion schedule service.
     pub fn schedules(&self) -> ScheduleService {
         ScheduleService::new(self.clone())
+    }
+
+    /// Organization-scoped provider secrets.
+    pub fn org_secrets(&self) -> OrgSecretService {
+        OrgSecretService::new(self.clone())
     }
 
     /// Intelligence service (RAG queries).

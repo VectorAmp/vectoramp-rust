@@ -152,6 +152,7 @@ async fn create_dataset_unknown_model_without_dim_errors() {
             CreateDatasetRequest::builder("docs").embedding(vectoramp::EmbeddingConfig {
                 provider: Some("acme".into()),
                 model: Some("acme-embed-9000".into()),
+                ..Default::default()
             }),
         )
         .await;
@@ -692,4 +693,85 @@ async fn dataset_ask_stream_targets_intelligence_with_stream_true() {
     let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["stream"], true);
     assert_eq!(body["dataset_id"], "ds_1");
+}
+
+#[tokio::test]
+async fn delete_vectors_sends_ids_and_write_concern() {
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/datasets/ds_1/vectors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "deleted": 2,
+            "dataset_id": "ds_1"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resp = client
+        .datasets()
+        .delete_vectors_with_write_concern(
+            "ds_1",
+            vec![VectorId::from("doc-1"), VectorId::from(42)],
+            Some("majority"),
+        )
+        .await
+        .expect("delete vectors ok");
+    assert_eq!(resp.deleted, 2);
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["ids"], json!(["doc-1", 42]));
+    assert_eq!(body["write_concern"], "majority");
+}
+
+#[tokio::test]
+async fn create_with_openai_api_key_puts_secret_then_sets_secret_ref() {
+    let server = MockServer::start().await;
+    Mock::given(method("PUT"))
+        .and(path("/org-secrets/emb%3Aopenai%3Aapi_key"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/datasets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "ds_oa_secret",
+            "name": "docs",
+            "dim": 1536,
+            "metric": "cosine",
+            "index_type": "sable"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let dataset = client
+        .datasets()
+        .create_with_openai_api_key("docs", "sk-test")
+        .await
+        .expect("created");
+    assert_eq!(dataset.id(), "ds_oa_secret");
+
+    let received = server.received_requests().await.unwrap();
+    let secret_req = received
+        .iter()
+        .find(|r| r.url.path() == "/org-secrets/emb%3Aopenai%3Aapi_key")
+        .expect("secret request");
+    let secret_body: serde_json::Value =
+        serde_json::from_slice(&secret_req.body).expect("json body");
+    assert_eq!(secret_body["value"], "sk-test");
+
+    let create_req = received
+        .iter()
+        .find(|r| r.url.path() == "/datasets")
+        .expect("create request");
+    let body: serde_json::Value = serde_json::from_slice(&create_req.body).expect("json body");
+    assert_eq!(body["embedding"]["provider"], "openai");
+    assert_eq!(body["embedding"]["model"], "text-embedding-3-small");
+    assert_eq!(
+        body["embedding"]["secret_ref"],
+        vectoramp::OPENAI_API_KEY_SECRET_REF
+    );
+    assert_eq!(body["dim"], 1536);
 }

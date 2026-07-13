@@ -9,14 +9,15 @@ use crate::client::Client;
 use crate::errors::{Error, Result};
 use crate::ingestion::IngestFilesOptions;
 use crate::intelligence::AskOptions;
+use crate::secrets::OPENAI_API_KEY_SECRET_REF;
 use crate::sources::IntoCreateSourceRequest;
 use crate::transport::Request;
 use crate::types::{
     infer_embedding_dim, AddTextsResponse, AskResponse, CreateDatasetRequest, DatasetDocumentList,
-    DatasetInfo, DatasetList, DocumentListOpts, EmbedRequest, EmbedResponse, EmbeddingConfig,
-    InsertVectorsRequest, InsertVectorsResponse, Job, Metadata, Rerank, RerankConfig,
-    SearchRequest, SearchResponse, TextDocument, Vector, VectorId, DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_EMBEDDING_PROVIDER,
+    DatasetInfo, DatasetList, DeleteVectorsRequest, DeleteVectorsResponse, DocumentListOpts,
+    EmbedRequest, EmbedResponse, EmbeddingConfig, InsertVectorsRequest, InsertVectorsResponse, Job,
+    Metadata, Rerank, RerankConfig, SearchRequest, SearchResponse, TextDocument, Vector, VectorId,
+    DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_PROVIDER,
 };
 
 /// Default search top_k applied when one is not supplied.
@@ -166,6 +167,29 @@ impl DatasetService {
             })
             .await?;
         Ok(Dataset::new(self.client.clone(), info))
+    }
+
+    /// Store/update an organization OpenAI API key, then create a dataset whose
+    /// embedding config references that stored secret.
+    pub async fn create_with_openai_api_key<R: Into<CreateDatasetRequest>, S: Into<String>>(
+        &self,
+        request: R,
+        api_key: S,
+    ) -> Result<Dataset> {
+        self.client
+            .org_secrets()
+            .put_openai_api_key(api_key.into())
+            .await?;
+        let mut request = request.into();
+        let embedding = request
+            .embedding
+            .get_or_insert_with(|| EmbeddingConfig::openai("small"));
+        embedding.provider = Some("openai".into());
+        if embedding.model.is_none() {
+            embedding.model = Some("text-embedding-3-small".into());
+        }
+        embedding.secret_ref = Some(OPENAI_API_KEY_SECRET_REF.into());
+        self.create(request).await
     }
 
     /// Fill in the SDK-side defaults for a create request: default embedding,
@@ -348,6 +372,38 @@ impl DatasetService {
         vectors: Vec<Vector>,
     ) -> Result<InsertVectorsResponse> {
         self.insert(dataset_id, vectors).await
+    }
+
+    /// Delete vectors from a dataset by id.
+    pub async fn delete_vectors<I: Into<VectorId>>(
+        &self,
+        dataset_id: &str,
+        ids: Vec<I>,
+    ) -> Result<DeleteVectorsResponse> {
+        self.delete_vectors_with_write_concern(dataset_id, ids, None::<String>)
+            .await
+    }
+
+    /// Delete vectors with an explicit write concern string.
+    pub async fn delete_vectors_with_write_concern<I: Into<VectorId>, S: Into<String>>(
+        &self,
+        dataset_id: &str,
+        ids: Vec<I>,
+        write_concern: Option<S>,
+    ) -> Result<DeleteVectorsResponse> {
+        let body = serde_json::to_value(DeleteVectorsRequest {
+            ids: ids.into_iter().map(Into::into).collect(),
+            write_concern: write_concern.map(Into::into),
+        })?;
+        self.client
+            .dispatcher()
+            .json(Request {
+                method: "DELETE".into(),
+                path: format!("/datasets/{dataset_id}/vectors"),
+                body: Some(body),
+                ..Default::default()
+            })
+            .await
     }
 
     /// Generate embeddings using the dataset embedding configuration.
@@ -673,6 +729,26 @@ impl Dataset {
     /// name.
     pub async fn insert_vectors(&self, vectors: Vec<Vector>) -> Result<InsertVectorsResponse> {
         self.client.datasets().insert(self.id(), vectors).await
+    }
+
+    /// Delete vectors from this dataset by id.
+    pub async fn delete_vectors<I: Into<VectorId>>(
+        &self,
+        ids: Vec<I>,
+    ) -> Result<DeleteVectorsResponse> {
+        self.client.datasets().delete_vectors(self.id(), ids).await
+    }
+
+    /// Delete vectors from this dataset with an explicit write concern string.
+    pub async fn delete_vectors_with_write_concern<I: Into<VectorId>, S: Into<String>>(
+        &self,
+        ids: Vec<I>,
+        write_concern: Option<S>,
+    ) -> Result<DeleteVectorsResponse> {
+        self.client
+            .datasets()
+            .delete_vectors_with_write_concern(self.id(), ids, write_concern)
+            .await
     }
 
     /// Embed and insert texts into this dataset.

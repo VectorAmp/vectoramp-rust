@@ -133,10 +133,25 @@ let custom = client
             .embedding(vectoramp::EmbeddingConfig {
                 provider: Some("acme".into()),
                 model: Some("acme-embed".into()),
+                ..Default::default()
             })
             .dim(1024),
     )
     .await?;
+
+// Store/update the org OpenAI key, then create a dataset that references it.
+let openai = client
+    .datasets()
+    .create_with_openai_api_key("docs", std::env::var("OPENAI_API_KEY").unwrap())
+    .await?;
+```
+
+You can also manage the stored OpenAI key directly:
+
+```rust
+client.org_secrets().put_openai_api_key(std::env::var("OPENAI_API_KEY").unwrap()).await?;
+client.org_secrets().update_openai_api_key(std::env::var("OPENAI_API_KEY").unwrap()).await?;
+client.org_secrets().has_openai_api_key().await?;
 ```
 
 `CreateDatasetRequest` has no `index_type` field. The SDK always sends
@@ -180,6 +195,14 @@ dataset
 
 // `insert_vectors` is an alias of `insert`.
 dataset.insert_vectors(vec![Vector::new(2, vec![0.7, 0.8, 0.9])]).await?;
+
+// Delete vectors by id (optional write concern).
+let deleted = dataset
+    .delete_vectors_with_write_concern(
+        vec![vectoramp::VectorId::from("doc-1"), vectoramp::VectorId::from(42)],
+        Some("majority"),
+    )
+    .await?;
 ```
 
 ### Add texts
