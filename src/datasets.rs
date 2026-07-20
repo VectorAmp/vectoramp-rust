@@ -16,8 +16,9 @@ use crate::types::{
     infer_embedding_dim, AddTextsResponse, AskResponse, CreateDatasetRequest, DatasetDocumentList,
     DatasetInfo, DatasetList, DeleteVectorsRequest, DeleteVectorsResponse, DocumentListOpts,
     EmbedRequest, EmbedResponse, EmbeddingConfig, InsertVectorsRequest, InsertVectorsResponse, Job,
-    Metadata, Rerank, RerankConfig, SearchRequest, SearchResponse, TextDocument, Vector, VectorId,
-    DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_PROVIDER,
+    Metadata, MetadataSchemaField, MetadataSchemaUpdateMode, Rerank, RerankConfig,
+    SearchRequest, SearchResponse, TextDocument, Vector, VectorId, DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_EMBEDDING_PROVIDER,
 };
 
 /// Default search top_k applied when one is not supplied.
@@ -240,6 +241,45 @@ impl DatasetService {
                 ..Default::default()
             })
             .await
+    }
+
+    /// Merge fields into a dataset's typed metadata schema.
+    pub async fn patch_metadata_schema(
+        &self,
+        dataset_id: &str,
+        schema: Vec<MetadataSchemaField>,
+    ) -> Result<Dataset> {
+        self.update_metadata_schema(dataset_id, schema, MetadataSchemaUpdateMode::Merge)
+            .await
+    }
+
+    /// Replace a dataset's complete typed metadata schema.
+    pub async fn replace_metadata_schema(
+        &self,
+        dataset_id: &str,
+        schema: Vec<MetadataSchemaField>,
+    ) -> Result<Dataset> {
+        self.update_metadata_schema(dataset_id, schema, MetadataSchemaUpdateMode::Replace)
+            .await
+    }
+
+    async fn update_metadata_schema(
+        &self,
+        dataset_id: &str,
+        schema: Vec<MetadataSchemaField>,
+        mode: MetadataSchemaUpdateMode,
+    ) -> Result<Dataset> {
+        let info: DatasetInfo = self
+            .client
+            .dispatcher()
+            .json(Request {
+                method: "PATCH".into(),
+                path: format!("/datasets/{dataset_id}/schema"),
+                body: Some(json!({ "schema": schema, "mode": mode })),
+                ..Default::default()
+            })
+            .await?;
+        Ok(Dataset::new(self.client.clone(), info))
     }
 
     /// List retained source documents using cursor pagination.

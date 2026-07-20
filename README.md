@@ -152,6 +152,22 @@ You can also manage the stored OpenAI key directly:
 client.org_secrets().put_openai_api_key(std::env::var("OPENAI_API_KEY").unwrap()).await?;
 client.org_secrets().update_openai_api_key(std::env::var("OPENAI_API_KEY").unwrap()).await?;
 client.org_secrets().has_openai_api_key().await?;
+// Optional typed metadata schema. Canonical types are String, U32, I32, I64,
+// F32, and F64.
+use vectoramp::{MetadataFieldType, MetadataSchemaField};
+let schema = vec![
+    MetadataSchemaField::new("price", MetadataFieldType::F32),
+    MetadataSchemaField::new("category", MetadataFieldType::String),
+];
+let products = client.datasets().create(
+    CreateDatasetRequest::builder("products").metadata_schema(schema.clone())
+).await?;
+
+// Merge fields while retaining existing ones, or replace the complete schema.
+client.datasets().patch_metadata_schema(products.id(), vec![
+    MetadataSchemaField::new("inventory", MetadataFieldType::U32)
+]).await?;
+client.datasets().replace_metadata_schema(products.id(), schema).await?;
 ```
 
 `CreateDatasetRequest` has no `index_type` field. The SDK always sends

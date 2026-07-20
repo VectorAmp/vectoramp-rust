@@ -2,7 +2,8 @@ use serde_json::json;
 use vectoramp::{
     sources::IntoCreateSourceRequest, AddTextsResponse, Client, ConfluenceSource,
     CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest, FileUploadSource, S3Source,
-    SearchInput, SearchOptions, UpdateScheduleRequest, Vector, VectorId, WebSource,
+    MetadataFieldType, MetadataSchemaField, SearchInput, SearchOptions, UpdateScheduleRequest,
+    Vector, VectorId, WebSource,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -82,6 +83,35 @@ async fn create_dataset_minimal_name_only_infers_defaults() {
     assert_eq!(body["embedding"]["model"], "VectorAmp-Embedding-4B");
     // Hybrid is not sent unless explicitly requested.
     assert!(body.get("hybrid").is_none());
+}
+
+#[tokio::test]
+async fn creates_and_updates_metadata_schema() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/datasets"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id":"ds_1", "name":"products", "dim":2560, "metric":"cosine"
+        }))).mount(&server).await;
+    Mock::given(method("PATCH")).and(path("/datasets/ds_1/schema"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id":"ds_1", "name":"products", "dim":2560, "metric":"cosine", "schema_version":2
+        }))).mount(&server).await;
+
+    let client = test_client(&server.uri());
+    let schema = vec![MetadataSchemaField::new("price", MetadataFieldType::F32)];
+    client.datasets().create(
+        CreateDatasetRequest::builder("products").metadata_schema(schema.clone())
+    ).await.expect("created");
+    client.datasets().patch_metadata_schema("ds_1", schema.clone()).await.expect("merged");
+    client.datasets().replace_metadata_schema("ds_1", vec![]).await.expect("replaced");
+
+    let requests = server.received_requests().await.unwrap();
+    let create: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    let merge: serde_json::Value = serde_json::from_slice(&requests[1].body).unwrap();
+    let replace: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+    assert_eq!(create["schema"][0], json!({"name":"price", "type":"f32"}));
+    assert_eq!(merge, json!({"schema":[{"name":"price", "type":"f32"}], "mode":"merge"}));
+    assert_eq!(replace, json!({"schema":[], "mode":"replace"}));
 }
 
 #[tokio::test]

@@ -96,6 +96,53 @@ pub struct DatasetInfo {
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Vec<MetadataSchemaField>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<u64>,
+}
+
+/// Canonical typed metadata field types accepted by the dataset schema API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MetadataFieldType {
+    String,
+    U32,
+    I32,
+    I64,
+    F32,
+    F64,
+}
+
+/// A named field in a dataset's typed metadata schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetadataSchemaField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: MetadataFieldType,
+}
+
+impl MetadataSchemaField {
+    pub fn new<S: Into<String>>(name: S, field_type: MetadataFieldType) -> Self {
+        Self {
+            name: name.into(),
+            field_type,
+        }
+    }
+}
+
+/// Update mode used by the dataset metadata-schema endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MetadataSchemaUpdateMode {
+    Merge,
+    Replace,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateMetadataSchemaRequest {
+    pub schema: Vec<MetadataSchemaField>,
+    pub mode: MetadataSchemaUpdateMode,
 }
 
 /// Paginated list of datasets.
@@ -139,6 +186,9 @@ pub struct CreateDatasetRequest {
     pub hybrid: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+    /// Optional typed metadata schema configured at creation time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Vec<MetadataSchemaField>>,
 }
 
 impl CreateDatasetRequest {
@@ -205,6 +255,12 @@ impl CreateDatasetBuilder {
     /// Attach arbitrary metadata to the dataset.
     pub fn metadata(mut self, metadata: Metadata) -> Self {
         self.request.metadata = Some(metadata);
+        self
+    }
+
+    /// Configure the dataset's typed metadata schema at creation time.
+    pub fn metadata_schema(mut self, schema: Vec<MetadataSchemaField>) -> Self {
+        self.request.schema = Some(schema);
         self
     }
 
