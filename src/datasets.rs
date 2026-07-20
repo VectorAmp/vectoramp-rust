@@ -16,8 +16,8 @@ use crate::types::{
     infer_embedding_dim, AddTextsResponse, AskResponse, CreateDatasetRequest, DatasetDocumentList,
     DatasetInfo, DatasetList, DeleteVectorsRequest, DeleteVectorsResponse, DocumentListOpts,
     EmbedRequest, EmbedResponse, EmbeddingConfig, InsertVectorsRequest, InsertVectorsResponse, Job,
-    Metadata, MetadataSchemaField, MetadataSchemaUpdateMode, Rerank, RerankConfig,
-    SearchRequest, SearchResponse, TextDocument, Vector, VectorId, DEFAULT_EMBEDDING_MODEL,
+    Metadata, MetadataSchemaField, MetadataSchemaUpdateMode, Rerank, RerankConfig, SearchRequest,
+    SearchResponse, TextDocument, Vector, VectorId, DEFAULT_EMBEDDING_MODEL,
     DEFAULT_EMBEDDING_PROVIDER,
 };
 
