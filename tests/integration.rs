@@ -2,8 +2,8 @@ use serde_json::json;
 use vectoramp::{
     sources::IntoCreateSourceRequest, AddTextsResponse, Client, ConfluenceSource,
     CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest, FileUploadSource,
-    MetadataFieldType, MetadataSchemaField, S3Source, SearchInput, SearchOptions,
-    UpdateScheduleRequest, Vector, VectorId, WebSource,
+    GitHubSource, GitLabSource, MetadataFieldType, MetadataSchemaField, S3Source, SearchInput,
+    SearchOptions, UpdateScheduleRequest, Vector, VectorId, WebSource,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -823,4 +823,199 @@ async fn create_with_openai_api_key_puts_secret_then_sets_secret_ref() {
         vectoramp::OPENAI_API_KEY_SECRET_REF
     );
     assert_eq!(body["dim"], 1536);
+}
+
+#[test]
+fn github_source_builds_config_and_default_name() {
+    let req: CreateSourceRequest = GitHubSource {
+        installation_id: 42,
+        repositories: vec!["octo/hello-world".into()],
+        ..Default::default()
+    }
+    .into_create_source_request();
+
+    assert_eq!(req.source_type, "github");
+    assert_eq!(req.config["type"], "github");
+    assert_eq!(req.config["installation_id"], 42);
+    assert_eq!(req.config["repositories"], json!(["octo/hello-world"]));
+    assert_eq!(req.config["sync_mode"], "incremental");
+    // Optional selection settings stay out so the server applies its defaults.
+    assert!(!req.config.contains_key("ref_mode"));
+    assert!(!req.config.contains_key("include_pull_requests"));
+    // Name derives from the first repository.
+    assert_eq!(req.name, "github-octo-hello-world");
+}
+
+#[test]
+fn github_source_serializes_all_options() {
+    let req: CreateSourceRequest = GitHubSource {
+        name: Some("Platform repos".into()),
+        installation_id: 7,
+        repositories: vec!["acme/api".into(), "acme/web".into()],
+        ref_mode: Some("explicit".into()),
+        refs: vec!["main".into()],
+        excluded_refs: vec!["wip".into()],
+        active_branch_days: Some(30),
+        include_pull_requests: Some(false),
+        include_review_threads: Some(false),
+        include_direct_commits: Some(false),
+        include_globs: vec!["docs/**".into()],
+        exclude_globs: vec!["**/*.lock".into()],
+        max_file_size_bytes: Some(2_000_000),
+        sync_mode: Some("full".into()),
+        ..Default::default()
+    }
+    .into_create_source_request();
+
+    assert_eq!(req.name, "Platform repos");
+    assert_eq!(req.config["ref_mode"], "explicit");
+    assert_eq!(req.config["refs"], json!(["main"]));
+    assert_eq!(req.config["excluded_refs"], json!(["wip"]));
+    assert_eq!(req.config["active_branch_days"], 30);
+    assert_eq!(req.config["include_pull_requests"], false);
+    assert_eq!(req.config["include_review_threads"], false);
+    assert_eq!(req.config["include_direct_commits"], false);
+    assert_eq!(req.config["include_globs"], json!(["docs/**"]));
+    assert_eq!(req.config["exclude_globs"], json!(["**/*.lock"]));
+    assert_eq!(req.config["max_file_size_bytes"], 2_000_000);
+    assert_eq!(req.config["sync_mode"], "full");
+}
+
+#[test]
+fn github_source_falls_back_to_sdk_default_name() {
+    let req: CreateSourceRequest = GitHubSource {
+        installation_id: 1,
+        ..Default::default()
+    }
+    .into_create_source_request();
+    assert_eq!(req.name, "rust-sdk-github-source");
+}
+
+#[test]
+fn gitlab_source_builds_config_and_default_name() {
+    let req: CreateSourceRequest = GitLabSource {
+        projects: vec!["mygroup/myproject".into()],
+        ..Default::default()
+    }
+    .into_create_source_request();
+
+    assert_eq!(req.source_type, "gitlab");
+    assert_eq!(req.config["type"], "gitlab");
+    assert_eq!(req.config["auth_mode"], "oauth");
+    assert_eq!(req.config["gitlab_url"], "https://gitlab.com");
+    assert_eq!(req.config["sync_mode"], "incremental");
+    assert_eq!(req.config["projects"], json!(["mygroup/myproject"]));
+    assert!(!req.config.contains_key("groups"));
+    assert_eq!(req.name, "gitlab-mygroup-myproject");
+}
+
+#[test]
+fn gitlab_source_name_falls_back_to_group_then_sdk_default() {
+    let from_group: CreateSourceRequest = GitLabSource {
+        groups: vec!["mygroup".into()],
+        ..Default::default()
+    }
+    .into_create_source_request();
+    assert_eq!(from_group.name, "gitlab-mygroup");
+    assert_eq!(from_group.config["groups"], json!(["mygroup"]));
+
+    let empty: CreateSourceRequest = GitLabSource::default().into_create_source_request();
+    assert_eq!(empty.name, "rust-sdk-gitlab-source");
+}
+
+#[test]
+fn gitlab_source_serializes_token_auth_and_connection_id() {
+    let token: CreateSourceRequest = GitLabSource {
+        projects: vec!["g/p".into()],
+        auth_mode: Some("token".into()),
+        gitlab_url: Some("https://gitlab.example.com".into()),
+        access_token: Some("glpat-secret".into()),
+        include_merge_requests: Some(false),
+        max_file_size_bytes: Some(500_000),
+        ..Default::default()
+    }
+    .into_create_source_request();
+
+    assert_eq!(token.config["auth_mode"], "token");
+    assert_eq!(token.config["gitlab_url"], "https://gitlab.example.com");
+    assert_eq!(token.config["access_token"], "glpat-secret");
+    assert_eq!(token.config["include_merge_requests"], false);
+    assert_eq!(token.config["max_file_size_bytes"], 500_000);
+    assert!(!token.config.contains_key("connection_id"));
+
+    let connection: CreateSourceRequest = GitLabSource {
+        groups: vec!["g".into()],
+        connection_id: Some("conn_gl".into()),
+        ..Default::default()
+    }
+    .into_create_source_request();
+    assert_eq!(connection.config["connection_id"], "conn_gl");
+    assert!(!connection.config.contains_key("access_token"));
+}
+
+#[tokio::test]
+async fn create_github_source_posts_to_ingestion_sources() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/ingestion/sources"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "src_gh",
+            "name": "github-octo-hello-world",
+            "source_type": "github"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let source = client
+        .sources()
+        .create_github(GitHubSource {
+            installation_id: 42,
+            repositories: vec!["octo/hello-world".into()],
+            ..Default::default()
+        })
+        .await
+        .expect("created");
+    assert_eq!(source.identifier(), Some("src_gh"));
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["source_type"], "github");
+    assert_eq!(body["name"], "github-octo-hello-world");
+    assert_eq!(body["config"]["installation_id"], 42);
+    assert_eq!(body["config"]["repositories"], json!(["octo/hello-world"]));
+}
+
+#[tokio::test]
+async fn create_gitlab_source_posts_to_ingestion_sources() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/ingestion/sources"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": "src_gl",
+            "name": "gitlab-mygroup-myproject",
+            "source_type": "gitlab"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let source = client
+        .sources()
+        .create_gitlab(GitLabSource {
+            projects: vec!["mygroup/myproject".into()],
+            auth_mode: Some("token".into()),
+            access_token: Some("glpat-secret".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("created");
+    assert_eq!(source.identifier(), Some("src_gl"));
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["source_type"], "gitlab");
+    assert_eq!(body["config"]["auth_mode"], "token");
+    assert_eq!(body["config"]["access_token"], "glpat-secret");
+    assert_eq!(body["config"]["projects"], json!(["mygroup/myproject"]));
 }

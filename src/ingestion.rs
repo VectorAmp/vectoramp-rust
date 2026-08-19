@@ -116,6 +116,16 @@ impl IngestionService {
         self.create_source(source).await
     }
 
+    /// Create a GitHub source backed by the VectorAmp GitHub App.
+    pub async fn create_github(&self, source: crate::sources::GitHubSource) -> Result<Source> {
+        self.create_source(source).await
+    }
+
+    /// Create a GitLab source (gitlab.com or self-managed).
+    pub async fn create_gitlab(&self, source: crate::sources::GitLabSource) -> Result<Source> {
+        self.create_source(source).await
+    }
+
     /// Create a managed file-upload source.
     pub async fn create_file_upload(
         &self,
