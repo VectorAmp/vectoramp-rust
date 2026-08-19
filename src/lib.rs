@@ -49,8 +49,8 @@ pub use intelligence::{AskOptions, AskStream, IntelligenceService, StreamEvent};
 pub use schedules::ScheduleService;
 pub use secrets::{OrgSecretService, OPENAI_API_KEY_SECRET_REF};
 pub use sources::{
-    ConfluenceSource, FileUploadSource, GcsSource, GenericSource, GoogleDriveSource,
-    IntoCreateSourceRequest, JiraSource, S3Source, WebSelectors, WebSource,
+    ConfluenceSource, FileUploadSource, GcsSource, GenericSource, GitHubSource, GitLabSource,
+    GoogleDriveSource, IntoCreateSourceRequest, JiraSource, S3Source, WebSelectors, WebSource,
 };
 pub use transport::{Request, Response, Transport};
 pub use types::*;

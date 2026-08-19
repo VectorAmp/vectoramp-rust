@@ -20,6 +20,8 @@ pub mod source_type {
     pub const JIRA: &str = "jira";
     pub const CONFLUENCE: &str = "confluence";
     pub const FILE_UPLOAD: &str = "file_upload";
+    pub const GITHUB: &str = "github";
+    pub const GITLAB: &str = "gitlab";
 }
 
 /// Trait implemented by typed source builders so they can be converted into
@@ -590,6 +592,240 @@ impl IntoCreateSourceRequest for ConfluenceSource {
             config,
             metadata: self.metadata,
         }
+    }
+}
+
+/// GitHub ingestion source backed by the VectorAmp GitHub App.
+///
+/// Repositories, active branches, pull requests, and review discussions are
+/// read through a GitHub App installation, so no token is passed to the SDK.
+/// Install the VectorAmp GitHub App from the Sources page in the app first; the
+/// installation id shown there is what `installation_id` expects.
+///
+/// Name defaults to `github-<owner>-<repo>` from the first repository, or
+/// `rust-sdk-github-source` when no repository is supplied.
+#[derive(Debug, Default, Clone)]
+pub struct GitHubSource {
+    pub name: Option<String>,
+    /// GitHub App installation id. Required by the API and must be positive.
+    pub installation_id: u64,
+    /// `owner/repo` full names to ingest. At least one is required by the API.
+    pub repositories: Vec<String>,
+    /// `active` (server default), `default`, or `explicit`.
+    pub ref_mode: Option<String>,
+    /// Explicit branch names, used with `ref_mode = "explicit"`.
+    pub refs: Vec<String>,
+    /// Branch names to skip.
+    pub excluded_refs: Vec<String>,
+    /// Activity window in days (1-90). Server default is 7.
+    pub active_branch_days: Option<u32>,
+    /// Ingest pull requests. Server default is true.
+    pub include_pull_requests: Option<bool>,
+    /// Ingest review discussions. Server default is true.
+    pub include_review_threads: Option<bool>,
+    /// Ingest commits pushed outside a pull request. Server default is true.
+    pub include_direct_commits: Option<bool>,
+    /// Path globs to include. Server default is `**/*`.
+    pub include_globs: Vec<String>,
+    /// Path globs to skip.
+    pub exclude_globs: Vec<String>,
+    /// Per-file size ceiling (1-25_000_000). Server default is 1_000_000.
+    pub max_file_size_bytes: Option<u64>,
+    pub sync_mode: Option<String>,
+    pub description: Option<String>,
+    pub metadata: Option<Metadata>,
+    pub config_extra: HashMap<String, Value>,
+}
+
+impl IntoCreateSourceRequest for GitHubSource {
+    fn into_create_source_request(self) -> CreateSourceRequest {
+        let mut config: HashMap<String, Value> = HashMap::new();
+        config.insert("type".into(), Value::String(source_type::GITHUB.into()));
+        config.insert("installation_id".into(), json!(self.installation_id));
+        config.insert("repositories".into(), json!(self.repositories));
+        config.insert(
+            "sync_mode".into(),
+            Value::String(self.sync_mode.unwrap_or_else(|| "incremental".into())),
+        );
+        if let Some(v) = self.ref_mode {
+            config.insert("ref_mode".into(), Value::String(v));
+        }
+        if !self.refs.is_empty() {
+            config.insert("refs".into(), json!(self.refs));
+        }
+        if !self.excluded_refs.is_empty() {
+            config.insert("excluded_refs".into(), json!(self.excluded_refs));
+        }
+        if let Some(v) = self.active_branch_days {
+            config.insert("active_branch_days".into(), json!(v));
+        }
+        if let Some(v) = self.include_pull_requests {
+            config.insert("include_pull_requests".into(), json!(v));
+        }
+        if let Some(v) = self.include_review_threads {
+            config.insert("include_review_threads".into(), json!(v));
+        }
+        if let Some(v) = self.include_direct_commits {
+            config.insert("include_direct_commits".into(), json!(v));
+        }
+        if !self.include_globs.is_empty() {
+            config.insert("include_globs".into(), json!(self.include_globs));
+        }
+        if !self.exclude_globs.is_empty() {
+            config.insert("exclude_globs".into(), json!(self.exclude_globs));
+        }
+        if let Some(v) = self.max_file_size_bytes {
+            config.insert("max_file_size_bytes".into(), json!(v));
+        }
+        merge_extra(&mut config, self.config_extra);
+
+        let name = self
+            .name
+            .unwrap_or_else(|| source_control_default_name("github", self.repositories.first()));
+
+        CreateSourceRequest {
+            source_type: source_type::GITHUB.into(),
+            name,
+            description: self.description,
+            config,
+            metadata: self.metadata,
+        }
+    }
+}
+
+/// GitLab ingestion source for gitlab.com or a self-managed instance.
+///
+/// Authenticates with an access token (`auth_mode = "token"` plus
+/// `access_token`) or a stored OAuth connection (`connection_id`). The API
+/// requires at least one group or project.
+///
+/// Name defaults to `gitlab-<path>` from the first project (then group), or
+/// `rust-sdk-gitlab-source` when neither is supplied.
+#[derive(Debug, Default, Clone)]
+pub struct GitLabSource {
+    pub name: Option<String>,
+    /// Group paths, e.g. `mygroup`.
+    pub groups: Vec<String>,
+    /// Project paths with namespace, e.g. `mygroup/myproject`.
+    pub projects: Vec<String>,
+    /// `oauth` (default) or `token`.
+    pub auth_mode: Option<String>,
+    /// Instance base URL. Defaults to `https://gitlab.com`.
+    pub gitlab_url: Option<String>,
+    /// Personal or group access token for `auth_mode = "token"`.
+    pub access_token: Option<String>,
+    /// Stored OAuth connection id, used instead of an inline token.
+    pub connection_id: Option<String>,
+    /// `active` (server default), `default`, or `explicit`.
+    pub ref_mode: Option<String>,
+    /// Explicit branch names, used with `ref_mode = "explicit"`.
+    pub refs: Vec<String>,
+    /// Branch names to skip.
+    pub excluded_refs: Vec<String>,
+    /// Activity window in days (1-90). Server default is 7.
+    pub active_branch_days: Option<u32>,
+    /// Ingest merge requests. Server default is true.
+    pub include_merge_requests: Option<bool>,
+    /// Ingest review discussions. Server default is true.
+    pub include_review_threads: Option<bool>,
+    /// Ingest commits pushed outside a merge request. Server default is true.
+    pub include_direct_commits: Option<bool>,
+    /// Path globs to include. Server default is `**/*`.
+    pub include_globs: Vec<String>,
+    /// Path globs to skip.
+    pub exclude_globs: Vec<String>,
+    /// Per-file size ceiling (1-25_000_000). Server default is 1_000_000.
+    pub max_file_size_bytes: Option<u64>,
+    pub sync_mode: Option<String>,
+    pub description: Option<String>,
+    pub metadata: Option<Metadata>,
+    pub config_extra: HashMap<String, Value>,
+}
+
+impl IntoCreateSourceRequest for GitLabSource {
+    fn into_create_source_request(self) -> CreateSourceRequest {
+        let mut config: HashMap<String, Value> = HashMap::new();
+        config.insert("type".into(), Value::String(source_type::GITLAB.into()));
+        config.insert(
+            "auth_mode".into(),
+            Value::String(self.auth_mode.unwrap_or_else(|| "oauth".into())),
+        );
+        config.insert(
+            "gitlab_url".into(),
+            Value::String(
+                self.gitlab_url
+                    .unwrap_or_else(|| "https://gitlab.com".into()),
+            ),
+        );
+        config.insert(
+            "sync_mode".into(),
+            Value::String(self.sync_mode.unwrap_or_else(|| "incremental".into())),
+        );
+        if !self.groups.is_empty() {
+            config.insert("groups".into(), json!(self.groups));
+        }
+        if !self.projects.is_empty() {
+            config.insert("projects".into(), json!(self.projects));
+        }
+        if let Some(v) = self.access_token {
+            config.insert("access_token".into(), Value::String(v));
+        }
+        if let Some(v) = self.connection_id {
+            config.insert("connection_id".into(), Value::String(v));
+        }
+        if let Some(v) = self.ref_mode {
+            config.insert("ref_mode".into(), Value::String(v));
+        }
+        if !self.refs.is_empty() {
+            config.insert("refs".into(), json!(self.refs));
+        }
+        if !self.excluded_refs.is_empty() {
+            config.insert("excluded_refs".into(), json!(self.excluded_refs));
+        }
+        if let Some(v) = self.active_branch_days {
+            config.insert("active_branch_days".into(), json!(v));
+        }
+        if let Some(v) = self.include_merge_requests {
+            config.insert("include_merge_requests".into(), json!(v));
+        }
+        if let Some(v) = self.include_review_threads {
+            config.insert("include_review_threads".into(), json!(v));
+        }
+        if let Some(v) = self.include_direct_commits {
+            config.insert("include_direct_commits".into(), json!(v));
+        }
+        if !self.include_globs.is_empty() {
+            config.insert("include_globs".into(), json!(self.include_globs));
+        }
+        if !self.exclude_globs.is_empty() {
+            config.insert("exclude_globs".into(), json!(self.exclude_globs));
+        }
+        if let Some(v) = self.max_file_size_bytes {
+            config.insert("max_file_size_bytes".into(), json!(v));
+        }
+        merge_extra(&mut config, self.config_extra);
+
+        let hint = self.projects.first().or_else(|| self.groups.first());
+        let name = self
+            .name
+            .unwrap_or_else(|| source_control_default_name("gitlab", hint));
+
+        CreateSourceRequest {
+            source_type: source_type::GITLAB.into(),
+            name,
+            description: self.description,
+            config,
+            metadata: self.metadata,
+        }
+    }
+}
+
+/// Derive `<source_type>-<sanitized path>` from the first repository/project,
+/// falling back to `rust-sdk-<source_type>-source` when none is supplied.
+fn source_control_default_name(source_type: &str, hint: Option<&String>) -> String {
+    match hint.filter(|value| !value.is_empty()) {
+        Some(value) => format!("{}-{}", source_type, sanitize(value)),
+        None => format!("rust-sdk-{source_type}-source"),
     }
 }
 

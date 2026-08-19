@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- Add `GitHubSource` and `GitLabSource` typed source builders.
+- Add `client.sources().create_github(...)` and `client.sources().create_gitlab(...)`.
+
 ## [0.3.0] - 2026-07-20
 
 ### Added

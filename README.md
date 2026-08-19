@@ -296,10 +296,10 @@ for doc in &page.documents {
 
 Typed builders fill in `source_type`, sensible defaults, and a generated name.
 Supported types: `web`, `s3`, `gcs`, `gdrive`, `jira`, `confluence`,
-`file_upload`, plus `GenericSource` as an escape hatch.
+`github`, `gitlab`, `file_upload`, plus `GenericSource` as an escape hatch.
 
 ```rust
-use vectoramp::{ConfluenceSource, S3Source, WebSource};
+use vectoramp::{ConfluenceSource, GitHubSource, GitLabSource, S3Source, WebSource};
 
 let web = client
     .sources()
@@ -332,10 +332,31 @@ let confluence = client
         ..Default::default()
     })
     .await?;
+
+// GitHub reads through the VectorAmp GitHub App, so no token is passed here.
+// Install the app from the Sources page and use the installation id it reports.
+let github = client
+    .sources()
+    .create_github(GitHubSource {
+        installation_id: 42,
+        repositories: vec!["acme/api".into(), "acme/web".into()],
+        ..Default::default()
+    })
+    .await?;
+
+let gitlab = client
+    .sources()
+    .create_gitlab(GitLabSource {
+        projects: vec!["mygroup/myproject".into()], // and/or groups
+        auth_mode: Some("token".into()),            // defaults to "oauth"
+        access_token: Some(std::env::var("GITLAB_TOKEN").unwrap()),
+        ..Default::default()
+    })
+    .await?;
 ```
 
 `create_source` accepts any builder directly, and the per-type
-`create_web/create_s3/create_gcs/create_google_drive/create_jira/create_confluence/create_file_upload/create_generic`
+`create_web/create_s3/create_gcs/create_google_drive/create_jira/create_confluence/create_github/create_gitlab/create_file_upload/create_generic`
 helpers are thin wrappers over it.
 
 ### Jobs
