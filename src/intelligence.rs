@@ -3,7 +3,6 @@
 use bytes::Bytes;
 use futures_util::stream::{Stream, StreamExt};
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::client::Client;
 use crate::datasets::{push_pagination, Pagination};
@@ -15,25 +14,44 @@ use crate::types::{
 };
 
 /// Optional knobs passed to [`IntelligenceService::ask_with`].
+///
+/// Every field defaults to `None`, which asks the API for its own default. In
+/// particular a `None` `dataset_ids` searches every dataset the caller can see.
 #[derive(Debug, Default, Clone)]
 pub struct AskOptions {
-    /// Dataset id (string), `"all"` for cross-dataset queries, or `None`.
-    pub dataset_id: Option<Value>,
+    /// Datasets to scope the query to. `None` searches every accessible dataset.
+    pub dataset_ids: Option<Vec<String>>,
     pub top_k: Option<u32>,
     pub conversation_history: Option<Vec<ConversationMessage>>,
     pub include_sources: Option<bool>,
 }
 
 impl AskOptions {
-    /// Scope the query to one dataset id.
+    /// Add one dataset id to the scope. Repeating this widens the scope rather
+    /// than replacing it.
     pub fn with_dataset<S: Into<String>>(mut self, dataset_id: S) -> Self {
-        self.dataset_id = Some(Value::String(dataset_id.into()));
+        self.dataset_ids
+            .get_or_insert_with(Vec::new)
+            .push(dataset_id.into());
         self
     }
 
-    /// Scope the query across all accessible datasets.
+    /// Set the entire dataset scope, replacing anything set before it.
+    pub fn with_datasets<I, S>(mut self, dataset_ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.dataset_ids = Some(dataset_ids.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Clear the scope so the query reaches every accessible dataset.
+    ///
+    /// That is what an absent `dataset_ids` means to the API; the old `"all"`
+    /// sentinel is retired.
     pub fn with_all_datasets(mut self) -> Self {
-        self.dataset_id = Some(Value::String("all".into()));
+        self.dataset_ids = None;
         self
     }
 
@@ -54,6 +72,22 @@ impl AskOptions {
         self.conversation_history = Some(history);
         self
     }
+}
+
+/// Normalize a dataset scope for the wire.
+///
+/// `POST /intelligence/query` reads an absent `dataset_ids` as "every dataset
+/// the caller can see", so an empty scope collapses to `None` rather than being
+/// sent as `[]` — which would be a narrower, different request. The retired
+/// `"all"` sentinel says nothing an absent field does not, so it is dropped too.
+fn normalize_dataset_ids(dataset_ids: Option<Vec<String>>) -> Option<Vec<String>> {
+    let scope: Vec<String> = dataset_ids
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| id.trim().to_owned())
+        .filter(|id| !id.is_empty() && id != "all")
+        .collect();
+    (!scope.is_empty()).then_some(scope)
 }
 
 /// Service running retrieval-augmented question answering.
@@ -80,7 +114,7 @@ impl IntelligenceService {
     ) -> Result<AskResponse> {
         let request = AskRequest {
             query: query.into(),
-            dataset_id: options.dataset_id,
+            dataset_ids: normalize_dataset_ids(options.dataset_ids),
             top_k: options.top_k,
             conversation_history: options.conversation_history,
             stream: false,
@@ -109,7 +143,7 @@ impl IntelligenceService {
     ) -> Result<AskStream> {
         let request = AskRequest {
             query: query.into(),
-            dataset_id: options.dataset_id,
+            dataset_ids: normalize_dataset_ids(options.dataset_ids),
             top_k: options.top_k,
             conversation_history: options.conversation_history,
             stream: true,

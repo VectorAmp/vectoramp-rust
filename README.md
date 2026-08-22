@@ -415,6 +415,15 @@ let answer = client
         AskOptions::default().with_all_datasets().with_top_k(8),
     )
     .await?;
+
+// Scoped to several datasets. `with_dataset` adds to the scope, so repeating it
+// widens it; `with_datasets` replaces the whole scope.
+let answer = client
+    .ask_with(
+        "Which contracts renew in Q4?",
+        AskOptions::default().with_datasets(["contracts-id", "invoices-id"]),
+    )
+    .await?;
 ```
 
 ### Streaming (SSE)

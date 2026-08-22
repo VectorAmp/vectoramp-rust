@@ -1,9 +1,9 @@
 use serde_json::json;
 use vectoramp::{
-    sources::IntoCreateSourceRequest, AddTextsResponse, Client, ConfluenceSource,
-    CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest, FileUploadSource,
-    GitHubSource, GitLabSource, MetadataFieldType, MetadataSchemaField, S3Source, SearchInput,
-    SearchOptions, UpdateScheduleRequest, Vector, VectorId, WebSource,
+    sources::IntoCreateSourceRequest, AddTextsResponse, AskOptions, AskRequest, Client,
+    ConfluenceSource, CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest,
+    FileUploadSource, GitHubSource, GitLabSource, MetadataFieldType, MetadataSchemaField, S3Source,
+    SearchInput, SearchOptions, UpdateScheduleRequest, Vector, VectorId, WebSource,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -331,6 +331,103 @@ async fn ask_helper_targets_intelligence_endpoint() {
     let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["query"], "What is VectorAmp?");
     assert_eq!(body["stream"], false);
+    // An unscoped ask must omit the scope: that is how the API says "every
+    // dataset you can see". The retired dataset_id would draw a 400.
+    assert!(body.get("dataset_ids").is_none(), "body = {body}");
+    assert!(body.get("dataset_id").is_none(), "body = {body}");
+}
+
+#[tokio::test]
+async fn ask_scopes_to_every_requested_dataset() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/intelligence/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "answer": "across three" })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    let resp = client
+        .ask_with(
+            "why?",
+            AskOptions::default().with_datasets(["ds_1", "ds_2", "ds_3"]),
+        )
+        .await
+        .expect("ask ok");
+    assert_eq!(resp.answer, "across three");
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["dataset_ids"], json!(["ds_1", "ds_2", "ds_3"]));
+}
+
+#[tokio::test]
+async fn with_dataset_widens_the_scope_rather_than_replacing_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/intelligence/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "answer": "ok" })))
+        .mount(&server)
+        .await;
+
+    let client = test_client(&server.uri());
+    client
+        .ask_with(
+            "why?",
+            AskOptions::default()
+                .with_dataset("ds_1")
+                .with_dataset("ds_2"),
+        )
+        .await
+        .expect("ask ok");
+
+    let received = server.received_requests().await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+    assert_eq!(body["dataset_ids"], json!(["ds_1", "ds_2"]));
+}
+
+#[tokio::test]
+async fn empty_and_all_scopes_omit_dataset_ids() {
+    // dataset_ids is optional and defaults to None. An empty scope, or one made
+    // only of the retired "all" sentinel, must leave the field off the wire
+    // rather than send [] — which would be a narrower, different request.
+    for options in [
+        AskOptions::default(),
+        AskOptions::default().with_datasets(Vec::<String>::new()),
+        AskOptions::default().with_dataset("all"),
+        AskOptions::default().with_datasets(["", "   "]),
+        AskOptions::default()
+            .with_dataset("ds_1")
+            .with_all_datasets(),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/intelligence/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "answer": "ok" })))
+            .mount(&server)
+            .await;
+
+        let client = test_client(&server.uri());
+        client.ask_with("why?", options).await.expect("ask ok");
+
+        let received = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
+        assert!(body.get("dataset_ids").is_none(), "body = {body}");
+        assert!(body.get("dataset_id").is_none(), "body = {body}");
+    }
+}
+
+#[tokio::test]
+async fn ask_request_defaults_leave_every_option_off_the_wire() {
+    // AskRequest::default() must serialize to nothing but the required fields:
+    // every option is genuinely optional, dataset_ids included.
+    let body = serde_json::to_value(AskRequest {
+        query: "why?".into(),
+        ..AskRequest::default()
+    })
+    .expect("serialize");
+
+    assert_eq!(body, json!({ "query": "why?", "stream": false }));
 }
 
 #[tokio::test]
@@ -741,7 +838,7 @@ async fn dataset_ask_stream_targets_intelligence_with_stream_true() {
     let received = server.received_requests().await.unwrap();
     let body: serde_json::Value = serde_json::from_slice(&received[0].body).expect("json body");
     assert_eq!(body["stream"], true);
-    assert_eq!(body["dataset_id"], "ds_1");
+    assert_eq!(body["dataset_ids"], json!(["ds_1"]));
 }
 
 #[tokio::test]

@@ -606,7 +606,7 @@ impl DatasetService {
         query: S,
         mut options: AskOptions,
     ) -> Result<AskResponse> {
-        options.dataset_id = Some(json!(dataset_id.to_owned()));
+        options.dataset_ids = Some(vec![dataset_id.to_owned()]);
         self.client
             .intelligence()
             .ask_with(query.into(), options)

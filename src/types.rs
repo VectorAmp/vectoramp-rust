@@ -708,8 +708,14 @@ pub struct ConversationMessage {
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct AskRequest {
     pub query: String,
+    /// Datasets to scope the question to. `None` (the default) searches every
+    /// dataset the caller can see.
+    ///
+    /// The singular `dataset_id` field is retired: the API answers any request
+    /// carrying it with a 400 naming `dataset_ids` as the replacement, and the
+    /// `"all"` sentinel it carried is expressed by leaving this `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dataset_id: Option<Value>,
+    pub dataset_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_k: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
