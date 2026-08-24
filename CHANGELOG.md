@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 This project follows semantic versioning.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** `AskRequest.dataset_id: Option<Value>` is replaced by
+  `AskRequest.dataset_ids: Option<Vec<String>>`, and `AskOptions.dataset_id` likewise becomes
+  `AskOptions.dataset_ids`. `POST /intelligence/query` retired the singular `dataset_id` and answers
+  any request carrying it with a 400 naming `dataset_ids` as the replacement.
+- `AskOptions::with_dataset` now *adds* a dataset to the scope, so repeating it widens the scope.
+- `AskOptions::with_all_datasets` clears the scope instead of sending the retired `"all"` sentinel —
+  an absent `dataset_ids` is how the API says "every dataset the caller can see".
+- `DatasetService::ask_with` / `ask_stream` scope to the dataset's own id via `dataset_ids`.
+- Every `AskOptions` field, `dataset_ids` included, stays optional and defaults to `None`; an empty
+  or `"all"`-only scope is omitted from the request rather than sent as `[]`.
+
+### Added
+
+- `AskOptions::with_datasets(ids)` for scoping one question to several datasets.
+
 ## [0.4.0] - 2026-08-20
 
 ### Added
