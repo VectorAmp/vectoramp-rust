@@ -59,6 +59,9 @@ impl ResponseBody {
 }
 
 /// Pluggable transport contract.
+// Clippy 1.99 flags a false-positive double_must_use in async_trait's generated future.
+// See https://github.com/rust-lang/rust-clippy/issues/17529.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Transport: Send + Sync {
     async fn send(&self, request: Request) -> Result<Response>;
