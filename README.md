@@ -394,6 +394,26 @@ let job = dataset
     .await?;
 ```
 
+## Dataset permissions
+
+Assign writes to an active dataset-local scope by external key. Leave the option unset to use the
+dataset default.
+
+```rust
+let vector = Vector::new("v1", vec![0.1, 0.2]).with_security_scope_key("tenant-acme");
+client.datasets().insert(dataset_id, vec![vector]).await?;
+
+client.datasets().add_texts_with(
+    dataset_id,
+    vec!["private handbook"],
+    AddTextsOptions { security_scope_key: Some("tenant-acme".into()), ..Default::default() },
+).await?;
+```
+
+`IngestFilesOptions::security_scope_key` scopes a file-upload job, and
+`SecurityScopeSelection` scopes scheduled writes. Search is filtered automatically from the
+caller's effective permissions.
+
 ## Intelligence / RAG
 
 `ask` defaults `top_k = 5`, `include_sources = true`, and dataset scope `"all"`

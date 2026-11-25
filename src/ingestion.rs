@@ -21,6 +21,8 @@ pub struct IngestFilesOptions {
     pub description: Option<String>,
     pub pipeline_id: Option<String>,
     pub metadata: Option<Metadata>,
+    /// Dataset-local scope assigned to every file in this upload job.
+    pub security_scope_key: Option<String>,
 }
 
 /// Cursor pagination options for dataset document listing. Re-exported as
@@ -207,7 +209,21 @@ impl IngestionService {
         source_id: &str,
         files: Vec<UploadFile>,
     ) -> Result<InitUploadResponse> {
-        let body = serde_json::to_value(InitUploadRequest { files })?;
+        self.init_upload_with_security_scope(source_id, files, None)
+            .await
+    }
+
+    /// Initialize presigned uploads with an optional dataset-local security scope.
+    pub async fn init_upload_with_security_scope(
+        &self,
+        source_id: &str,
+        files: Vec<UploadFile>,
+        security_scope_key: Option<String>,
+    ) -> Result<InitUploadResponse> {
+        let body = serde_json::to_value(InitUploadRequest {
+            files,
+            security_scope_key,
+        })?;
         self.client
             .dispatcher()
             .json(Request {
@@ -294,7 +310,13 @@ impl IngestionService {
                 content_type: Some(content_type),
             });
         }
-        let init = self.init_upload(&source_id, upload_files.clone()).await?;
+        let init = self
+            .init_upload_with_security_scope(
+                &source_id,
+                upload_files.clone(),
+                options.security_scope_key.clone(),
+            )
+            .await?;
 
         let mut file_ids = Vec::with_capacity(init.uploads.len());
         let http = reqwest::Client::new();

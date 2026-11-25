@@ -1,9 +1,10 @@
 use serde_json::json;
 use vectoramp::{
-    sources::IntoCreateSourceRequest, AddTextsResponse, AskOptions, AskRequest, Client,
-    ConfluenceSource, CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest,
+    sources::IntoCreateSourceRequest, AddTextsOptions, AddTextsResponse, AskOptions, AskRequest,
+    Client, ConfluenceSource, CreateDatasetRequest, CreateScheduleRequest, CreateSourceRequest,
     FileUploadSource, GitHubSource, GitLabSource, MetadataFieldType, MetadataSchemaField, S3Source,
-    SearchInput, SearchOptions, UpdateScheduleRequest, Vector, VectorId, WebSource,
+    SearchInput, SearchOptions, SecurityScopeSelection, UpdateScheduleRequest, Vector, VectorId,
+    WebSource,
 };
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -293,7 +294,14 @@ async fn add_texts_embeds_then_inserts() {
     let client = test_client(&server.uri());
     let resp: AddTextsResponse = client
         .datasets()
-        .add_texts("ds_1", vec!["hello", "world"])
+        .add_texts_with(
+            "ds_1",
+            vec!["hello", "world"],
+            AddTextsOptions {
+                security_scope_key: Some("tenant-acme".into()),
+                ..Default::default()
+            },
+        )
         .await
         .expect("add_texts ok");
     assert_eq!(resp.inserted, 2);
@@ -310,6 +318,7 @@ async fn add_texts_embeds_then_inserts() {
     assert_eq!(vectors[0]["id"], "text-1");
     assert_eq!(vectors[1]["id"], "text-2");
     assert_eq!(vectors[0]["metadata"]["text"], "hello");
+    assert_eq!(vectors[0]["security_scope_key"], "tenant-acme");
 }
 
 #[tokio::test]
@@ -538,6 +547,10 @@ async fn schedules_crud_and_trigger() {
             dataset_id: "ds_1".into(),
             cron: "0 0 * * *".into(),
             timezone: Some("UTC".into()),
+            security_scope: Some(SecurityScopeSelection {
+                external_key: "tenant-acme".into(),
+                scope_type: None,
+            }),
             ..Default::default()
         })
         .await
