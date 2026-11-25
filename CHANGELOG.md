@@ -13,6 +13,11 @@ This project follows semantic versioning.
 
 ### Changed
 
+- **Source compatibility:** `Vector`, `AddTextsOptions`, `IngestFilesOptions`,
+  `CreateScheduleRequest`, and `UpdateScheduleRequest` gain optional security-scope fields.
+  Existing exhaustive struct literals must add the new field (`None`) or use
+  `..Default::default()`; constructor-based calls and literals already using defaults
+  continue to work. Omitting a scope retains the dataset default on the wire.
 - **Breaking:** `AskRequest.dataset_id: Option<Value>` is replaced by
   `AskRequest.dataset_ids: Option<Vec<String>>`, and `AskOptions.dataset_id` likewise becomes
   `AskOptions.dataset_ids`. `POST /intelligence/query` retired the singular `dataset_id` and answers
