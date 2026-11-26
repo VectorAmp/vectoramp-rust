@@ -523,6 +523,7 @@ impl DatasetService {
                     id: doc.id,
                     values,
                     metadata: Some(metadata),
+                    security_scope_key: options.security_scope_key.clone(),
                 }
             })
             .collect();
@@ -723,6 +724,8 @@ impl From<Vec<TextDocument>> for AddTextsInput {
 pub struct AddTextsOptions {
     pub embedding_provider: Option<String>,
     pub embedding_model: Option<String>,
+    /// Dataset-local scope assigned to every generated vector.
+    pub security_scope_key: Option<String>,
 }
 
 /// Bound dataset resource. Created by [`DatasetService::get`],

@@ -357,6 +357,8 @@ pub struct Vector {
     pub values: Vec<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_scope_key: Option<String>,
 }
 
 impl Vector {
@@ -366,12 +368,19 @@ impl Vector {
             id: id.into(),
             values,
             metadata: None,
+            security_scope_key: None,
         }
     }
 
     /// Attach metadata to the vector.
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// Assign this vector to a dataset-local security scope.
+    pub fn with_security_scope_key(mut self, key: impl Into<String>) -> Self {
+        self.security_scope_key = Some(key.into());
         self
     }
 }
@@ -668,6 +677,8 @@ pub struct UploadFile {
 #[derive(Debug, Default, Clone, Serialize)]
 pub(crate) struct InitUploadRequest {
     pub files: Vec<UploadFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_scope_key: Option<String>,
 }
 
 /// One presigned upload destination returned by the upload init endpoint.
@@ -1002,6 +1013,16 @@ pub struct CreateScheduleRequest {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_scope: Option<SecurityScopeSelection>,
+}
+
+/// Dataset-local security scope selection for scheduled ingestion writes.
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct SecurityScopeSelection {
+    pub external_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_type: Option<String>,
 }
 
 /// Body for updating an ingestion schedule. Only `Some` fields are sent.
@@ -1019,6 +1040,8 @@ pub struct UpdateScheduleRequest {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_scope: Option<SecurityScopeSelection>,
 }
 
 /// Response from an immediate schedule trigger.
