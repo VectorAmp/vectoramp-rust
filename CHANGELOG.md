@@ -6,6 +6,8 @@ This project follows semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-26
+
 ### Added
 
 - Add optional dataset security-scope support to vector inserts, `add_texts_with`, file ingestion,
